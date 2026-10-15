@@ -6,6 +6,11 @@ Build a portable, versioned declarative video composition protocol and a lightwe
 ## Scope guardrails
 - Protocol and domain semantics are the source of truth; UI and MCP are adapters.
 - No image/video generation runtime, no ComfyUI-like execution graph, no built-in media rendering, no publishing integrations.
+- Deployment MUST target Cloudflare Workers; do not introduce PM2/systemd/VPS runtime, fabricated hostnames, example.com domains or hardcoded ports as deployed facts.
+- Production hostname MUST be a `talkincode.net` subdomain managed by Cloudflare; planned default `video-compose.talkincode.net` until actual DNS/Worker routing is verified.
+- Browser UI, REST API and MCP MUST be protected with Cloudflare Access (Zero Trust SSO / service authentication as appropriate); Worker MUST still enforce per-project authorization.
+- GitHub-to-Workers deployment MUST be supported, preferring native Workers Builds GitHub integration; GitHub Actions + Wrangler is an alternative, never a simultaneous competing production deployer.
+- Distinguish design decisions from verified live infrastructure. Do not report CI, DNS, Access, R2 or D1 as configured without inspecting actual resources.
 - Do not embed external model/API/vendor dependencies in the portable composition schema.
 - Never use mutable URLs or signed R2 URLs as permanent asset identifiers.
 - No last-write-wins on conflicting composition edits. Every write has a base revision and idempotency key.
@@ -20,7 +25,7 @@ Build a portable, versioned declarative video composition protocol and a lightwe
 - TypeScript strict mode, ESM. Planned npm workspaces: `apps/api` (Cloudflare Worker/Hono/MCP), `apps/web` (React/Vite), `packages/protocol`, `packages/domain`, `packages/client`.
 - Cloudflare D1 is authoritative for project metadata and revisions; R2 for immutable media; Durable Objects only if evidence shows need for real-time fan-out.
 - Shared domain operations serve UI/REST/MCP. Version JSON Schema and document any breaking change and migration.
-- The roadmap defines WHAT/NOT: [docs/roadmap.md](docs/roadmap.md). Technical decisions: [docs/architecture.md](docs/architecture.md).
+- The roadmap defines WHAT/NOT: [docs/roadmap.md](docs/roadmap.md). Technical decisions: [docs/architecture.md](docs/architecture.md). Deployment/authentication: [docs/deployment.md](docs/deployment.md).
 
 ## Subject and reference continuity requirements
 - Any change to a character or prop definition requires an auditable revision and scoped authorization; do not alter old character/prop appearance by mutating a referenced asset.
