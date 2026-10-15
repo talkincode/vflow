@@ -10,6 +10,9 @@ Build a portable, versioned declarative video composition protocol and a lightwe
 - Never use mutable URLs or signed R2 URLs as permanent asset identifiers.
 - No last-write-wins on conflicting composition edits. Every write has a base revision and idempotency key.
 - Immutable revision history and immutable media identity. Never overwrite referenced media in place.
+- Characters/props are first-class project Subjects, not filename conventions or plain asset tags. Model stable IDs, semantic descriptions, immutable subject revisions, curated reference packs and explicit variants.
+- Shots MUST pin subject revision and optional variant; updating the canonical reference set must NEVER silently alter existing shots. Candidate reference assets are not automatically approved.
+- Project/portable composition export MUST preserve or explicitly resolve pinned subject dependencies; avoid hardcoding provider-specific generation metadata.
 - Keep secrets and personal/private assets out of commits, logs and public responses.
 - Do not add infrastructure or background services without an observable requirement.
 
@@ -18,6 +21,12 @@ Build a portable, versioned declarative video composition protocol and a lightwe
 - Cloudflare D1 is authoritative for project metadata and revisions; R2 for immutable media; Durable Objects only if evidence shows need for real-time fan-out.
 - Shared domain operations serve UI/REST/MCP. Version JSON Schema and document any breaking change and migration.
 - The roadmap defines WHAT/NOT: [docs/roadmap.md](docs/roadmap.md). Technical decisions: [docs/architecture.md](docs/architecture.md).
+
+## Subject and reference continuity requirements
+- Any change to a character or prop definition requires an auditable revision and scoped authorization; do not alter old character/prop appearance by mutating a referenced asset.
+- A new reference image can be added as a candidate; promotion to an approved pack requires a deliberate operation subject to permissions and concurrency checks.
+- Cross-shot consistency is expressed through pinned subject versions and variants, not duplicate per-shot free-text descriptions.
+- Reference model draft: [docs/subjects.md](docs/subjects.md). Acceptance: see the dedicated Subject row in [roadmap](docs/roadmap.md).
 
 ## Agent workflow
 1. Read README, roadmap, architecture and relevant source before modifying code.
