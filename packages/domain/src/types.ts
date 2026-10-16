@@ -24,6 +24,21 @@ export interface ProjectRecord {
   members: Record<string, ProjectRole>;
 }
 
+export interface CompositionSummary {
+  id: string;
+  projectId: string;
+  title?: string;
+  headRevision: number;
+}
+
+export interface ProjectOverview {
+  project: ProjectRecord;
+  role: ProjectRole;
+  compositions: CompositionSummary[];
+  assetCount: number;
+  subjectCount: number;
+}
+
 export interface AssetRecord {
   id: string;
   projectId: string;

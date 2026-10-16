@@ -3,10 +3,12 @@ import {
   type AttachSubjectReferenceInput,
   type ChangeRecord,
   type CompositionRevisionRecord,
+  type CompositionSummary,
   computeSha256Hex,
   DomainError,
   type DomainErrorCode,
   type ProjectRecord,
+  type ProjectOverview,
   type ProposalRecord,
   type SubjectPatchChanges,
   type SubjectRecord,
@@ -129,6 +131,7 @@ export class VideoComposeClient {
     name: string;
     description?: string;
     members?: Record<string, ProjectRole>;
+    operationId?: string;
   }): Promise<ProjectRecord> {
     const data = await this.requestJson<{ project: ProjectRecord }>(
       "/v1/projects",
@@ -152,6 +155,19 @@ export class VideoComposeClient {
       `/v1/projects/${encodeURIComponent(projectId)}`,
     );
     return data.project;
+  }
+
+  async getProjectOverview(projectId: string): Promise<ProjectOverview> {
+    return this.requestJson(
+      `/v1/projects/${encodeURIComponent(projectId)}/overview`,
+    );
+  }
+
+  async listCompositions(projectId: string): Promise<CompositionSummary[]> {
+    const data = await this.requestJson<{ compositions: CompositionSummary[] }>(
+      `/v1/projects/${encodeURIComponent(projectId)}/compositions`,
+    );
+    return data.compositions;
   }
 
   async getProjectAccess(projectId: string): Promise<{ role: ProjectRole }> {

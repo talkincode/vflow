@@ -107,6 +107,11 @@ export function createApiApp(
     );
   });
 
+  app.get("/v1/projects/:projectId/overview", async (c) => {
+    const actor = extractActorFromHeaders(c.req.raw.headers, authConfig);
+    return c.json(await domain.getProjectOverview(actor, c.req.param("projectId")));
+  });
+
   app.put("/v1/projects/:projectId/members/:targetActorId", async (c) => {
     const actor = extractActorFromHeaders(c.req.raw.headers, authConfig);
     const body = await c.req.json();

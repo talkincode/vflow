@@ -13,6 +13,7 @@ import type {
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Workbench } from "../../apps/web/src/Workbench.tsx";
+import { projectComposition } from "./project-fixture.ts";
 import {
   HUMAN_READER_HEADERS,
   HUMAN_WRITER_HEADERS,
@@ -235,11 +236,23 @@ describe("E2E 09 — Cloudflare D1/R2 持久化绑定、Static Assets 与空库�
       headers: HUMAN_READER_HEADERS,
     });
 
-    await writerClient.createProject({
+    const projectCreation = {
       id: "d1-proj",
       name: "D1 Project",
-      members: { "bob-reader@talkincode.net": "reader" },
-    });
+      members: { "bob-reader@talkincode.net": "reader" as const },
+      operationId: "d1-project-once",
+    };
+    const project = await writerClient.createProject(projectCreation);
+    expect(await writerClient.createProject(projectCreation)).toEqual(project);
+    const compositionCreation = {
+      projectId: "d1-proj", operationId: "d1-composition-once",
+      document: projectComposition("d1-proj", "first", "第一条", "开场"),
+    };
+    const revision = await writerClient.createComposition(compositionCreation);
+    expect(await writerClient.createComposition(compositionCreation)).toEqual(revision);
+    const overview = await readerClient.getProjectOverview("d1-proj");
+    expect(overview.role).toBe("reader");
+    expect(overview.compositions).toHaveLength(1);
 
     // Reader can read project from D1
     const proj = await readerClient.getProject("d1-proj");

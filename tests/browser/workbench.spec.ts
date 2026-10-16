@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 
+const demoUrl = "/projects/demo/compositions/episode-001";
+
 test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
@@ -8,7 +10,7 @@ test("100-shot workspace: genuine previews, roomy prompts, draft retention, atom
   page,
   request,
 }) => {
-  await page.goto("/");
+  await page.goto(demoUrl);
   await expect(page.getByTestId("composition-title")).toHaveText(
     "雨巷 · 第一集",
   );
@@ -104,7 +106,7 @@ test("preview failure offers retry and keyboard tabs preserve the current draft"
   await page.route("**/assets/preview-png/content*", (route) =>
     unavailable ? route.abort() : route.continue(),
   );
-  await page.goto("/");
+  await page.goto(demoUrl);
   await expect(page.locator(".hero-preview")).toContainText("素材加载失败");
   unavailable = false;
   await page
@@ -144,7 +146,7 @@ test("reader can preview and navigate, cannot save, upload or bypass project aut
     extraHTTPHeaders: { "x-test-role": "reader" },
   });
   const page = await context.newPage();
-  await page.goto("/");
+  await page.goto(demoUrl);
   await expect(page.getByTestId("save-status")).toHaveText("只读访问");
   await expect(page.getByTestId("inspector-save-btn")).toBeDisabled();
   await expect(page.getByLabel("画面提示词", { exact: true })).toBeDisabled();
@@ -188,7 +190,7 @@ for (const width of [360, 850, 1280, 1440, 1920]) {
     page,
   }) => {
     await page.setViewportSize({ width, height: width === 1280 ? 720 : 900 });
-    await page.goto("/");
+    await page.goto(demoUrl);
     await expect(page.getByTestId("shot-inspector")).toBeVisible();
     if (width >= 1280)
       await expect(page.getByTestId("inspector-save-btn")).toBeInViewport();

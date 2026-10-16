@@ -53,6 +53,14 @@
 - Previous production Worker version recorded before this release: `0f5954cf-dc58-4974-959b-d770cdc82e5e` (deployment `3b144f27-ad08-43d3-9e66-26560199c3c3`, 100%). If this release fails, use `npx wrangler rollback 0f5954cf-dc58-4974-959b-d770cdc82e5e --config apps/api/wrangler.jsonc` after checking that it is still the intended prior version, and verify the protected UI again. No D1 migration or R2 object mutation is part of this release; Worker rollback still does not roll back stored composition edits.
 - After promotion, independently read back the Cloudflare deployment, verify anonymous rejection for UI/API/MCP, and inspect the logged-in workbench at the production hostname. Record the actual version and results in the release evidence; a dry run is not production verification.
 
+## Project navigation release (2026-10-16)
+
+- Replaces the fixed `demo / episode-001` browser entry with the project library and explicit project/composition URLs. Workers Static Assets retain SPA fallback so direct URLs must serve the application under the existing Access perimeter.
+- Adds authorized project-overview reads and creation receipts in the existing idempotency table. No D1 schema migration or media rewrite is required; existing callers without creation keys remain compatible.
+- Acceptance: 32 integration checks across 11 files and 14 Chromium checks, including two projects with two compositions each, direct URLs/history navigation, reader/writer separation, transaction failure and lost-response recovery, and leaving an unsaved workbench. The previous media/workbench acceptance remains in the same CI run.
+- Pre-release Worker version: `d63ba2e3-3c60-4ea1-8299-e77af9a026e9` (source commit `6d3ebe8569e4e534bce1223a98502d8fae386dbc`). If rollback is needed, verify that this is the intended baseline and run `npx wrangler rollback d63ba2e3-3c60-4ea1-8299-e77af9a026e9 --config apps/api/wrangler.jsonc`. Stored projects/compositions remain in D1; rollback only removes the new browser entry and creation-retry behavior.
+- Before reporting success, verify the exact commit's CI, the actual Worker version, anonymous Access redirects for the new paths, the logged-in project library, project overview, and a composition opened by its direct URL. Save production screenshots outside the public repository.
+
 ## Official references
 - [Cloudflare Workers Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)
 - [Cloudflare Access for Workers](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)

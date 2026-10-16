@@ -12,7 +12,7 @@ Video Compose 是面向人和多个 Agent 的开源视频作品编排协议与�
 
 ## 当前能力清单
 - **开源仓库与文档**：GitHub Public 仓库已创建；README、AGENTS 和架构文档与代码实现保持同步。
-- **本地核心实现与验收**：`packages/protocol`、`packages/domain`、`packages/client`、`apps/api`、`apps/web` 及 10 套 E2E/集成测试（`tests/e2e/01` 至 `10`）已实现；真实 Chromium 检查覆盖合成图片/视频/音频、100 镜头、只读/可写角色和 360–1920 像素布局。
+- **本地核心实现与验收**：`packages/protocol`、`packages/domain`、`packages/client`、`apps/api`、`apps/web` 及 11 套 E2E/集成测试（`tests/e2e/01` 至 `11`）已实现；真实 Chromium 检查覆盖项目/多编排导航、新建与失败恢复、合成图片/视频/音频、100 镜头、只读/可写角色和 360–1920 像素布局。
 - **Cloudflare 生产环境（M4 已部署核验）**：子域名 `https://video-compose.talkincode.net`、Cloudflare Access 可复用策略（SSO + Service Token）、D1（`video-compose-db`）与 R2（`video-compose-media`）真实绑定及线上端到端读写均已部署并实测通过。
 
 ## 非目标（铁律）
@@ -56,7 +56,7 @@ Video Compose 是面向人和多个 Agent 的开源视频作品编排协议与�
 
 | 一级业务功能 | 阶段 | 风险 | 权限 | 状态修改 | Happy Path E2E | 失败路径 | 角色验证 | 失败恢复/回滚 | 真实证据 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 项目与编排管理 | 本地已实现 | 高 | 是 | 是 | ✅ | ✅ | ✅ (`writer`/`reader`/非成员/匿名) | ✅ (事务故障回滚与重试) | `tests/e2e/01-project-and-composition.test.ts`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx` |
+| 项目与编排管理 | 本地已实现 | 高 | 是 | 是 | ✅ (项目入口/概览、新建、跨项目多编排、直达 URL/历史导航) | ✅ (创建失败、响应丢失、非法/未授权链接、同键不同内容拒绝) | ✅ (`writer`/`reader`/非成员/匿名；只读 UI 与 API 拒绝) | ✅ (事务回滚、保留表单、创建幂等重试、D1 跨 isolate 重放、草稿离开提醒与取消) | `tests/e2e/01-project-and-composition.test.ts`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx`, `tests/e2e/11-project-navigation.test.tsx`, `tests/browser/projects.spec.ts` |
 | 声明式协议与验证 | 本地已实现 | 高 | 否 | 否 | ✅ | ✅ (循环依赖/非法帧/URL 引用) | 不适用：离线验证无用户角色 | 不适用：纯验证只读（含输入零修改断言） | `tests/e2e/02-protocol-validation.test.ts` |
 | 不可变资产管理与受权预览 | 本地已实现 | 高 | 是 | 是 | ✅ (上传、图片解码、音视频播放/seek、Range/HEAD) | ✅ (完整性/覆盖/引用删除/416/缺文件) | ✅ (`writer`/`reader` 可预览；非成员/匿名拒绝) | ✅ (失败上传不登记资产；缺对象恢复后可重新读取) | `tests/e2e/03-immutable-assets.test.ts`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx`, `tests/e2e/10-media-and-editor-recovery.test.tsx`, `tests/browser/workbench.spec.ts` |
 | 角色/道具设定与参考图管理 | 本地已实现 | 高 | 是 | 是 | ✅ (候选表单、真实参考、批准、固定版本/变体绑定) | ✅ (并发冲突/未批准绑定拒绝/无参考表单拦截) | ✅ (`writer`/`reader`) | ✅ (冲突或越权保持原权威修订不变) | `tests/e2e/04-subjects-and-references.test.ts`, `tests/e2e/10-media-and-editor-recovery.test.tsx` |
@@ -66,13 +66,13 @@ Video Compose 是面向人和多个 Agent 的开源视频作品编排协议与�
 | JSON/YAML 交换 | 本地已实现 | 高 | 是 | 是 | ✅ | ✅ (损坏语法/缺失资产依赖原子拒绝) | ✅ (`reader` 可导出不可导入 / `writer` 可导入) | ✅ (导入失败保持目标项目原编排不变) | `tests/e2e/08-interchange-json-yaml.test.ts` |
 
 ### 已识别缺口和最低期望
-- **项目与编排**：`writer` 能创建项目和编排；`reader` 可读但写入被拒，非成员读写均被拒；失败不留半成品。
+- **项目与编排**：浏览器首页列出当前身份有权访问的项目，可新建项目，从项目概览新建/进入/切换编排；工作台有返回项目的入口，复制地址和前进/后退正确。`writer` 能创建项目和编排；`reader` 可读但不能向该项目写入，非成员被拒；失败保留表单，创建重试不重复，跨项目不残留前一个项目的草稿或素材。已有 `11` 集成场景与真实 Chromium `projects.spec.ts` 验收。
 - **协议**：合法样例（含全局音轨 `audioTracks`、分镜依赖 `dependsOn`、候选集 `candidates`）通过；缺失 ID、`dependsOn` 循环依赖、引用无效均给出稳定机器错误；校验不修改输入。
 - **资产**：两阶段上传校验 SHA-256 后可跨镜头与全局音轨复用；哈希不匹配或无 `writer` 权限拒绝；失败上传不登记可见资产。
 - **设定与参考图**：`writer` 创建角色/道具设定、在 `status: candidate` 下修改并登记多张参考图、批准为 `status: approved` 后绑定两个分镜至同一设定修订（含省略 `variant` 时回退 `defaultVariant`）；生成新的角色/道具版本不改变旧镜头所引用版本；不存在、越权、冲突或资源损坏时操作失败且原状态不变。
 - **协作**：两个 Agent 基于稳定 ID 的不相交 Patch 可安全合并，同一字段冲突可机读，Proposal 审批走相同合并校验，任何历史修订可恢复。
 - **HTTP/MCP**：同一操作经 REST 与 MCP 得到一致结果；匿名/非成员/`reader` 越权写入拒绝；幂等键重复请求与失败重试安全。
-- **工作台**：分镜在网格/清单/依赖拓扑三视图显示一致；标签、镜头与布局切换保留当前页面草稿；清空可保存、失败可重试、并发冲突须核对，局部撤销保留他人无关字段；100 镜头可搜索/排序/批量，`reader` 不可通过 UI 绕过 API。当前草稿不跨页面关闭持久化；项目/多编排切换、时间线缩放和提案差异审阅仍是后续交互能力，不因本轮布局改造视为完成。
+- **工作台**：分镜在网格/清单/依赖拓扑三视图显示一致；标签、镜头与布局切换保留当前页面草稿；清空可保存、失败可重试、并发冲突须核对，局部撤销保留他人无关字段；100 镜头可搜索/排序/批量，`reader` 不可通过 UI 绕过 API。项目/多编排切换与直达地址已补齐，离开草稿可取消；当前草稿不跨页面关闭持久化。时间线缩放和提案差异审阅仍是后续交互能力。
 - **交换**：JSON/YAML 导出重新导入语义不变；损坏格式或缺失引用依赖（未登记的 Asset / SubjectRevision）原子拒绝，原数据不变。
 
 真实 E2E/集成证据出现前，所有缺口均不得标记完成。

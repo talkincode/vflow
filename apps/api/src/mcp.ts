@@ -34,9 +34,11 @@ export interface JsonRpcResponse {
 export const MCP_TOOLS_MANIFEST = [
   { name: "project_list", description: "List projects accessible to the caller" },
   { name: "project_get", description: "Get project details and member roles" },
+  { name: "project_overview", description: "Get authorized project overview, composition list and shared resource counts" },
   { name: "project_create", description: "Create a new project" },
   { name: "composition_get", description: "Get composition revision and resolved subjects" },
   { name: "composition_create", description: "Create a new composition in a project" },
+  { name: "composition_list", description: "List compositions accessible within a project" },
   { name: "composition_patch", description: "Apply ID-addressed typed patch to a composition" },
   { name: "composition_history", description: "List immutable revision and change history" },
   { name: "composition_restore", description: "Restore a historical composition revision" },
@@ -176,12 +178,16 @@ async function dispatchMcpTool(
     case "project_get":
       return domain.getProject(actor, String(args.projectId ?? ""));
 
+    case "project_overview":
+      return domain.getProjectOverview(actor, String(args.projectId ?? ""));
+
     case "project_create":
       return domain.createProject(actor, {
         id: String(args.id ?? ""),
         name: String(args.name ?? ""),
         description: args.description ? String(args.description) : undefined,
         members: args.members as Record<string, "reader" | "writer"> | undefined,
+        operationId: args.operationId ? String(args.operationId) : undefined,
       });
 
     case "composition_get":
@@ -191,6 +197,9 @@ async function dispatchMcpTool(
         String(args.compositionId ?? ""),
         typeof args.revision === "number" ? args.revision : undefined,
       );
+
+    case "composition_list":
+      return domain.listCompositions(actor, String(args.projectId ?? ""));
 
     case "composition_create":
       return domain.createComposition(actor, {

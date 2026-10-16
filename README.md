@@ -11,6 +11,7 @@ Video Compose 面向人与多个 Agent 共创视频作品。项目记录可移�
 
 ## 核心能力
 - Project 下多个 Composition，共享可检索的 Asset，并采用简洁的项目级 `reader` / `writer` 读写权限隔离。
+- 首页提供项目列表、搜索与新建；项目页显示编排及共享资源概览，可创建编排并选择画面规格/帧率。工作台支持返回项目、切换编排和独立直达地址。
 - **角色/道具设定库**：项目级主体（Subject）有独立定义、稳定 ID、带状态（`status: candidate | approved`）的修订版本、外观/状态变体（含 `defaultVariant`）和多视角参考图集；`candidate` 状态便于修改迭代，批准为 `approved` 后冻结；分镜绑定确定版本，禁止参考设定悄然漂移。详见 [主体与参考图规范草案](docs/subjects.md)。
 - v1 JSON/YAML 声明式编排协议和可机读 Schema。
 - 稳定 Shot ID、播放序列与分镜依赖拓扑（`dependsOn` DAG）、全局音轨（`audioTracks` 如全局 BGM/旁白）、分镜多参考图、可选参考视频、Prompt、音视频候选集（`candidates`）与选定输出（`selected`）、整数帧时长与扩展元数据。
@@ -29,10 +30,12 @@ TypeScript（strict/ESM）贯穿协议、服务与 Web；npm workspaces。
 详见 [architecture](docs/architecture.md)。
 
 ## 项目状态
-- **本地核心实现与验收**：协议、领域、HTTP/MCP、D1/R2 持久化、Web 工作台已有 10 套 E2E/集成测试；另有真实 Chromium 验收覆盖媒体解码、100 镜头操作、两种角色及 360–1920 像素布局。执行方式见下方。
+- **本地核心实现与验收**：协议、领域、HTTP/MCP、D1/R2 持久化、Web 工作台已有 11 套 E2E/集成测试；真实 Chromium 验收覆盖项目/多编排导航与创建、失败恢复、媒体解码、100 镜头操作、两种角色及 360–1920 像素布局。执行方式见下方。
 - **线上环境**：Cloudflare Workers 自定义域名、Access、D1/R2 绑定已核验。当前通过 Wrangler 手动发布；GitHub Actions 只做质量检查，Workers Builds 自动触发尚未配置。最近发布证据与回滚说明见 [deployment](docs/deployment.md)。
 
 ## 本地验证与发布
+
+浏览器入口为项目列表 `/`；项目为 `/projects/:projectId`；编排工作台为 `/projects/:projectId/compositions/:compositionId`。使用页面中的链接即可复制或收藏对应地址。新项目为空，创建编排后开始编辑第一镜；不会自动初始化固定的演示项目。离开有未保存草稿的工作台时会触发浏览器提醒。
 
 使用 Node.js 26 和仓库锁定的 npm 依赖：
 

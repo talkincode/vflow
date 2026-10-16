@@ -5,6 +5,7 @@ import path from "node:path";
 import { createApiApp } from "../apps/api/src/app.ts";
 import { VideoComposeClient } from "../packages/client/src/index.ts";
 import { seedWorkbench } from "../tests/e2e/workbench-fixture.ts";
+import { seedProjectLibrary } from "../tests/e2e/project-fixture.ts";
 if (process.env.NODE_ENV === "production")
   throw new Error("The acceptance server is local-only.");
 const root = path.resolve(import.meta.dirname, "../apps/web/dist");
@@ -22,6 +23,7 @@ async function reset(count = 100): Promise<void> {
       backend.app.fetch(new Request(String(input), init)),
   });
   await seedWorkbench(client, count);
+  await seedProjectLibrary(client);
 }
 await reset();
 const server = createServer(async (request, response) => {
@@ -33,7 +35,17 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/__test/fail-next" && request.method === "POST") {
-      backend.domain.store.injectFaultOnce("patchComposition");
+      const stage = url.searchParams.get("stage") ?? "patchComposition";
+      if (
+        !["patchComposition", "createProject", "createComposition"].includes(
+          stage,
+        )
+      ) {
+        response.writeHead(400);
+        response.end("Unknown fault stage");
+        return;
+      }
+      backend.domain.store.injectFaultOnce(stage);
       response.end("armed");
       return;
     }

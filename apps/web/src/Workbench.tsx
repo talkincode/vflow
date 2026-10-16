@@ -26,6 +26,8 @@ export interface WorkbenchProps {
   projectId: string;
   compositionId: string;
   initialView?: WorkbenchViewMode;
+  navigation?: React.ReactNode;
+  allowBootstrap?: boolean;
 }
 type CompositionData = Awaited<
   ReturnType<VideoComposeClient["getComposition"]>
@@ -107,6 +109,8 @@ export function Workbench({
   projectId,
   compositionId,
   initialView = "grid",
+  navigation,
+  allowBootstrap = true,
 }: WorkbenchProps): React.ReactElement {
   const [data, setData] = useState<CompositionData | null>(null);
   const [subjects, setSubjects] = useState<SubjectRecord[]>([]);
@@ -174,11 +178,12 @@ export function Workbench({
         setHistory(historyResult.value.revisions);
       else setNotice("修订历史暂时无法加载，请重试刷新。");
     } catch (err) {
-      if (err instanceof DomainError && err.code === "NOT_FOUND")
-        setBootstrap(true);
-      else setError(messageOf(err));
+      if (err instanceof DomainError && err.code === "NOT_FOUND") {
+        if (allowBootstrap) setBootstrap(true);
+        else setError("未找到此编排。请返回项目，选择已有编排或新建编排。");
+      } else setError(messageOf(err));
     }
-  }, [client, projectId, compositionId]);
+  }, [client, projectId, compositionId, allowBootstrap]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -454,6 +459,7 @@ export function Workbench({
       <div className="welcome">
         <img src="/logo.svg" alt="Video Compose" width="48" height="48" />
         <h1>Video Compose</h1>
+        {navigation}
         {bootstrap ? (
           <div data-testid="empty-workspace-bootstrap">
             <p>创建项目与第一条分镜编排，开始整理你的作品。</p>
@@ -467,7 +473,7 @@ export function Workbench({
             </button>
           </div>
         ) : (
-          <p role="status">正在加载工作台…</p>
+          <p role="status">{error ? "暂时无法打开编排" : "正在加载工作台…"}</p>
         )}
         {error && (
           <p role="alert" data-testid="workbench-error">
@@ -540,9 +546,11 @@ export function Workbench({
           </span>
         </a>
         <div className="composition-heading">
-          <span className="breadcrumb">
-            {projectId} / {compositionId}
-          </span>
+          {navigation ?? (
+            <span className="breadcrumb">
+              {projectId} / {compositionId}
+            </span>
+          )}
           <h1 data-testid="composition-title">{doc.title ?? doc.id}</h1>
         </div>
         <div className="header-meta">

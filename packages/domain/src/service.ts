@@ -1,4 +1,5 @@
 import {
+  canonicalizeJson,
   type ActorIdentity,
   type AssetManifestEntry,
   type CompositionDocument,
@@ -36,6 +37,7 @@ import {
   type ConflictDetail,
   DomainError,
   type ProjectRecord,
+  type ProjectOverview,
   type ProposalRecord,
   type SubjectPatchChanges,
   type SubjectRecord,
@@ -135,6 +137,7 @@ export class VideoComposeDomainService {
       name: string;
       description?: string;
       members?: Record<string, ProjectRole>;
+      operationId?: string;
     },
   ): Promise<ProjectRecord> {
     const authActor = this.assertAuthenticated(actor);
@@ -143,6 +146,26 @@ export class VideoComposeDomainService {
     }
 
     return this.store.runInTransaction("createProject", (draft) => {
+      const receiptKey = input.operationId
+        ? canonicalizeJson([
+            "project-create", authActor.actorKind, authActor.actorId,
+            input.id, input.operationId,
+          ])
+        : undefined;
+      const fingerprint = canonicalizeJson({
+        id: input.id, name: input.name,
+        description: input.description || null, members: input.members ?? {},
+      });
+      const receipt = receiptKey
+        ? draft.idempotencyRecords[receiptKey] as { fingerprint: string; result: ProjectRecord } | undefined
+        : undefined;
+      if (receipt) {
+        this.assertProjectPermission(draft, input.id, actor, "writer");
+        if (receipt.fingerprint !== fingerprint) {
+          throw new DomainError("VALIDATION_FAILED", "Idempotency key was already used with different creation data.");
+        }
+        return receipt.result;
+      }
       if (draft.projects[input.id]) {
         throw new DomainError("ALREADY_EXISTS", `Project '${input.id}' already exists.`);
       }
@@ -160,6 +183,9 @@ export class VideoComposeDomainService {
         members,
       };
       draft.projects[input.id] = record;
+      if (receiptKey) {
+        draft.idempotencyRecords[receiptKey] = { fingerprint, result: structuredClone(record) };
+      }
       return record;
     });
   }
@@ -199,6 +225,25 @@ export class VideoComposeDomainService {
     const state = await this.store.readState();
     const { project } = this.assertProjectPermission(state, projectId, actor, "reader");
     return project;
+  }
+
+  async getProjectOverview(
+    actor: ActorIdentity | null | undefined,
+    projectId: string,
+  ): Promise<ProjectOverview> {
+    const state = await this.store.readState();
+    const access = this.assertProjectPermission(state, projectId, actor, "reader");
+    return {
+      project: access.project,
+      role: access.project.members[access.actor.actorId],
+      compositions: Object.values(state.compositions)
+        .filter((composition) => composition.projectId === projectId)
+        .map(({ id, title, headRevision }) => ({ id, projectId, title, headRevision })),
+      assetCount: Object.values(state.assets)
+        .filter((asset) => asset.projectId === projectId).length,
+      subjectCount: Object.values(state.subjects)
+        .filter((subject) => subject.projectId === projectId).length,
+    };
   }
 
   // ==================== ASSET MANAGEMENT ====================
@@ -1031,6 +1076,23 @@ export class VideoComposeDomainService {
         "writer",
       );
 
+      const receiptKey = input.operationId
+        ? canonicalizeJson([
+            "composition-create", input.projectId, authActor.actorKind,
+            authActor.actorId, input.document.id, input.operationId,
+          ])
+        : undefined;
+      const fingerprint = canonicalizeJson(input.document);
+      const receipt = receiptKey
+        ? draft.idempotencyRecords[receiptKey] as { fingerprint: string; result: CompositionRevisionRecord } | undefined
+        : undefined;
+      if (receipt) {
+        if (receipt.fingerprint !== fingerprint) {
+          throw new DomainError("VALIDATION_FAILED", "Idempotency key was already used with different creation data.");
+        }
+        return receipt.result;
+      }
+
       if (input.document.project !== input.projectId) {
         throw new DomainError(
           "VALIDATION_FAILED",
@@ -1080,6 +1142,9 @@ export class VideoComposeDomainService {
         revisions: { 1: revRecord },
       };
       draft.changes[cKey] = [];
+      if (receiptKey) {
+        draft.idempotencyRecords[receiptKey] = { fingerprint, result: structuredClone(revRecord) };
+      }
       return revRecord;
     });
   }
