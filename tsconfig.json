@@ -9,12 +9,22 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "allowImportingTsExtensions": true,
-    "types": []
+    "jsx": "react-jsx",
+    "types": ["node"],
+    "paths": {
+      "@video-compose/protocol": ["./packages/protocol/src/index.ts"],
+      "@video-compose/domain": ["./packages/domain/src/index.ts"],
+      "@video-compose/client": ["./packages/client/src/index.ts"],
+      "@video-compose/api": ["./apps/api/src/index.ts"],
+      "@video-compose/web/*": ["./apps/web/src/*"]
+    }
   },
   "include": [
     "apps/**/*.ts",
     "apps/**/*.tsx",
     "packages/**/*.ts",
-    "packages/**/*.tsx"
+    "packages/**/*.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx"
   ]
 }

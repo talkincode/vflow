@@ -1,0 +1,34 @@
+{
+  // Cloudflare Worker configuration for Video Compose (verified hostname: video-compose.talkincode.net)
+  "name": "video-compose",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "video-compose.talkincode.net",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/v1/*", "/mcp"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "video-compose-db",
+      "database_id": "028d0760-9c64-4f4d-876e-8e6b33236acc",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "video-compose-media"
+    }
+  ]
+}
+

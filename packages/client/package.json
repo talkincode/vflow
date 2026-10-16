@@ -1,0 +1,17 @@
+{
+  "name": "@video-compose/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@video-compose/protocol": "*",
+    "@video-compose/domain": "*"
+  }
+}
