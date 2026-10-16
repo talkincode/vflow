@@ -8,3 +8,5 @@ coverage/
 !.env.example
 .DS_Store
 *.log
+test-results/
+playwright-report/

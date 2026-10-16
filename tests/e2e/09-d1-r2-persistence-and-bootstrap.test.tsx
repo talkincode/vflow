@@ -88,10 +88,11 @@ function createR2BucketAdapter(): CloudflareR2BucketLike {
         contentType: options?.httpMetadata?.contentType,
       });
     },
-    async get(key) {
+    async get(key, options) {
       const item = store.get(key);
       if (!item) return null;
       return {
+        body: new Response(options?.range ? item.bytes.slice(options.range.offset, options.range.offset + options.range.length) : new Uint8Array(item.bytes)).body!,
         async arrayBuffer() {
           return new Uint8Array(item.bytes).buffer;
         },
@@ -206,6 +207,14 @@ describe("E2E 09 — Cloudflare D1/R2 持久化绑定、Static Assets 与空库�
     expect(freshFetched.revisionRecord.document.audioTracks[0].asset).toBe(
       "d1-r2-bgm",
     );
+    // Preview streams use the persisted D1 asset and R2 range API across isolates.
+    const partial = await worker.fetch(new Request(
+      writerClient.assetContentUrl("demo", "d1-r2-bgm"),
+      { headers: { ...HUMAN_WRITER_HEADERS, Range: "bytes=0-8" } },
+    ), env);
+    expect(partial.status).toBe(206);
+    expect(await partial.text()).toBe("persisted");
+    expect(partial.headers.get("content-range")).toBe("bytes 0-8/25");
   });
 
   it("Failure Path, Role Verification & Rollback: enforces reader/writer roles on D1 and rolls back D1 batch on CAS conflict", async () => {

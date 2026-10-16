@@ -159,7 +159,7 @@ describe("E2E 07 — 轻量工作台 (Lightweight Three-View React Workbench)", 
     );
   });
 
-  it("Failure Path, Role Verification & Recovery: reader cannot bypass API via UI inspector, surfaces error banner, and rolls back displayed state", async () => {
+  it("Failure Path and Role Verification: read-only inspector disables edits and a direct API bypass leaves the authoritative state unchanged", async () => {
     const { writerClient, readerClient } = createTestHarness();
 
     await writerClient.createProject({
@@ -211,11 +211,12 @@ describe("E2E 07 — 轻量工作台 (Lightweight Three-View React Workbench)", 
     fireEvent.change(input, { target: { value: "Unauthorized UI mutation" } });
     fireEvent.click(screen.getByTestId("inspector-save-btn"));
 
-    await waitFor(() => {
-      expect(screen.getByTestId("workbench-error").textContent).toContain(
-        "reader",
-      );
-    });
+    expect((screen.getByTestId("inspector-save-btn") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("save-status").textContent).toBe("只读访问");
+    await expect(readerClient.patchComposition({
+      projectId: "demo", compositionId: "episode-001", baseRevision: 1,
+      operationId: "reader-direct-bypass", operations: [{ op: "update_shot_fields", shotId: "shot-001", description: "Unauthorized direct mutation" }],
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     // Authoritative state and revision remain untouched
     expect(screen.getByTestId("composition-revision").textContent).toBe(

@@ -3,7 +3,7 @@
 ## 项目概述
 Video Compose 是面向人和多个 Agent 的开源视频作品编排协议与轻量协作工作台。不同 Agent 可读取同一项目、变更分镜并向项目交付媒体资产，而不需要共享模型或生成运行时。系统只定义作品结构、素材引用、修订及权限。
 
-目标数据流（设计，尚未实现）：Web / Agent -> REST / MCP -> 统一领域操作 -> D1（项目、修订、索引）和 R2（不可变资产）。
+已实现数据流：Web / Agent -> REST / MCP -> 统一领域操作 -> D1（项目、修订、索引）和 R2（不可变资产）。
 
 ## 项目画像（目标状态）
 一份可移植、机器可验证的视频作品定义，支持多分镜、时间线、图片/视频/音频引用、候选素材、稳定身份和可追溯修改。角色与道具不仅是图片文件，也有项目级可复用的身份、定义、版本、外观/状态变体及多张权威参考图；分镜固定引用确定的主体设定版本。人与 Agent 拥有相同的读写协议接口，提供轻量网格、清单、拓扑和上下文 Agent 侧栏。
@@ -12,7 +12,7 @@ Video Compose 是面向人和多个 Agent 的开源视频作品编排协议与�
 
 ## 当前能力清单
 - **开源仓库与文档**：GitHub Public 仓库已创建；README、AGENTS 和架构文档与代码实现保持同步。
-- **本地核心实现与 E2E 验收（M1–M3 已完成）**：`packages/protocol`、`packages/domain`、`packages/client`、`apps/api`、`apps/web` 及 8 套端到端验收测试（`tests/e2e/01` 至 `08`）已实现并在本地通过验证。
+- **本地核心实现与验收**：`packages/protocol`、`packages/domain`、`packages/client`、`apps/api`、`apps/web` 及 10 套 E2E/集成测试（`tests/e2e/01` 至 `10`）已实现；真实 Chromium 检查覆盖合成图片/视频/音频、100 镜头、只读/可写角色和 360–1920 像素布局。
 - **Cloudflare 生产环境（M4 已部署核验）**：子域名 `https://video-compose.talkincode.net`、Cloudflare Access 可复用策略（SSO + Service Token）、D1（`video-compose-db`）与 R2（`video-compose-media`）真实绑定及线上端到端读写均已部署并实测通过。
 
 ## 非目标（铁律）
@@ -42,7 +42,7 @@ Video Compose 是面向人和多个 Agent 的开源视频作品编排协议与�
 ## 分阶段实施里程碑
 1. **M1 — 协议与纯领域核心（`packages/protocol` + `packages/domain`）**：✅ 本地已实现并验证（v1 JSON Schema、JSON/YAML 无损往返、DAG 依赖环检测、Subject 绑定与状态校验、基于稳定 ID 的 Typed Patch 与三方 Disjoint Merge）。
 2. **M2 — 存储、读写权限与 REST/MCP 接口（`apps/api` + `packages/client`）**：✅ 本地已实现并验证（事务存储、R2 两阶段上传与 SHA-256 校验、`reader`/`writer` 权限隔离、Hono REST API 与远程 Streamable HTTP MCP）。
-3. **M3 — 轻量协作工作台（`apps/web`）**：✅ 本地已实现并验证（全中文深色三栏工作台：分镜网格/清单/依赖拓扑三视图、比例时间线、角色/道具设定库、冲突审阅与 Agent 侧栏，完成三视图与多角色联调 E2E）。
+3. **M3 — 轻量协作工作台（`apps/web`）**：✅ 本地已实现并验证（中文深色工作台，中央分镜/素材/设定/协作与历史/协议标签；预览编辑并排与专注模式；网格/清单/依赖三视图；受权媒体预览；逐镜头草稿、显式冲突核对、连续局部撤销、搜索/跳转/排序/原子批量时长；真实浏览器与多角色验收）。
 4. **M4 — Cloudflare 生产部署与 Zero Trust 验收**：✅ 已部署并实测通过（D1 `028d0760-9c64-4f4d-876e-8e6b33236acc`、R2 `video-compose-media`、`https://video-compose.talkincode.net` 路由、Cloudflare Access App `72992495-1fba-419e-83e7-d825db14f557` 可复用策略与线上 REST/MCP/UI 全链路验证）。
 
 ## 验收矩阵（业务能力覆盖矩阵）
@@ -58,11 +58,11 @@ Video Compose 是面向人和多个 Agent 的开源视频作品编排协议与�
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 项目与编排管理 | 本地已实现 | 高 | 是 | 是 | ✅ | ✅ | ✅ (`writer`/`reader`/非成员/匿名) | ✅ (事务故障回滚与重试) | `tests/e2e/01-project-and-composition.test.ts`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx` |
 | 声明式协议与验证 | 本地已实现 | 高 | 否 | 否 | ✅ | ✅ (循环依赖/非法帧/URL 引用) | 不适用：离线验证无用户角色 | 不适用：纯验证只读（含输入零修改断言） | `tests/e2e/02-protocol-validation.test.ts` |
-| 不可变资产管理 | 本地已实现 | 高 | 是 | 是 | ✅ | ✅ (SHA-256 不匹配/覆盖拒绝/引用中删除拒绝) | ✅ (`writer`/`reader`) | ✅ (校验失败清理临时对象且不暴露资产) | `tests/e2e/03-immutable-assets.test.ts`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx` |
-| 角色/道具设定与参考图管理 | 本地已实现 | 高 | 是 | 是 | ✅ | ✅ (并发同字段冲突/未批准修订绑定拒绝) | ✅ (`writer`/`reader`) | ✅ (冲突或越权保持原权威修订不变) | `tests/e2e/04-subjects-and-references.test.ts` |
+| 不可变资产管理与受权预览 | 本地已实现 | 高 | 是 | 是 | ✅ (上传、图片解码、音视频播放/seek、Range/HEAD) | ✅ (完整性/覆盖/引用删除/416/缺文件) | ✅ (`writer`/`reader` 可预览；非成员/匿名拒绝) | ✅ (失败上传不登记资产；缺对象恢复后可重新读取) | `tests/e2e/03-immutable-assets.test.ts`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx`, `tests/e2e/10-media-and-editor-recovery.test.tsx`, `tests/browser/workbench.spec.ts` |
+| 角色/道具设定与参考图管理 | 本地已实现 | 高 | 是 | 是 | ✅ (候选表单、真实参考、批准、固定版本/变体绑定) | ✅ (并发冲突/未批准绑定拒绝/无参考表单拦截) | ✅ (`writer`/`reader`) | ✅ (冲突或越权保持原权威修订不变) | `tests/e2e/04-subjects-and-references.test.ts`, `tests/e2e/10-media-and-editor-recovery.test.tsx` |
 | 多 Agent 修订与审阅 | 本地已实现 | 高 | 是 | 是 | ✅ | ✅ (同字段并发修改返回结构化冲突) | ✅ (`writer`/`reader` Agent) | ✅ (冲突不污染 head，支持历史版本恢复) | `tests/e2e/05-multi-agent-revisions.test.ts` |
 | HTTP/MCP 接入 | 本地已实现 | 高 | 是 | 是 | ✅ | ✅ (未授权/非法调用返回结构化错误) | ✅ (匿名/`reader`/`writer`) | ✅ (幂等键重试与事务故障恢复) | `tests/e2e/06-http-and-mcp-parity.test.ts` |
-| 轻量工作台 | 本地已实现 | 中 | 是 | 是 | ✅ | ✅ (`reader` 越权保存拦截告警) | ✅ (`writer`/`reader`) | ✅ (越权失败回滚 UI 显示状态 + 撤销恢复 + 空库初始化) | `tests/e2e/07-lightweight-workbench.test.tsx`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx` |
+| 轻量工作台 | 本地已实现 | 中 | 是 | 是 | ✅ (三视图/中央标签/媒体/100 镜头/响应布局) | ✅ (只读禁写、保存失败、并发冲突、批量与排序失败) | ✅ (`writer`/`reader`，API 绕过拒绝) | ✅ (逐镜头草稿/原键重试/清空保存/局部撤销/批量原子回滚/排序重试/空库初始化) | `tests/e2e/07-lightweight-workbench.test.tsx`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx`, `tests/e2e/10-media-and-editor-recovery.test.tsx`, `tests/browser/workbench.spec.ts` |
 | JSON/YAML 交换 | 本地已实现 | 高 | 是 | 是 | ✅ | ✅ (损坏语法/缺失资产依赖原子拒绝) | ✅ (`reader` 可导出不可导入 / `writer` 可导入) | ✅ (导入失败保持目标项目原编排不变) | `tests/e2e/08-interchange-json-yaml.test.ts` |
 
 ### 已识别缺口和最低期望
@@ -72,7 +72,7 @@ Video Compose 是面向人和多个 Agent 的开源视频作品编排协议与�
 - **设定与参考图**：`writer` 创建角色/道具设定、在 `status: candidate` 下修改并登记多张参考图、批准为 `status: approved` 后绑定两个分镜至同一设定修订（含省略 `variant` 时回退 `defaultVariant`）；生成新的角色/道具版本不改变旧镜头所引用版本；不存在、越权、冲突或资源损坏时操作失败且原状态不变。
 - **协作**：两个 Agent 基于稳定 ID 的不相交 Patch 可安全合并，同一字段冲突可机读，Proposal 审批走相同合并校验，任何历史修订可恢复。
 - **HTTP/MCP**：同一操作经 REST 与 MCP 得到一致结果；匿名/非成员/`reader` 越权写入拒绝；幂等键重复请求与失败重试安全。
-- **工作台**：分镜在网格/清单/依赖拓扑三视图显示一致，编辑与撤销不丢失，`reader` 越权操作不能通过 UI 绕过 API。
+- **工作台**：分镜在网格/清单/依赖拓扑三视图显示一致；标签、镜头与布局切换保留当前页面草稿；清空可保存、失败可重试、并发冲突须核对，局部撤销保留他人无关字段；100 镜头可搜索/排序/批量，`reader` 不可通过 UI 绕过 API。当前草稿不跨页面关闭持久化；项目/多编排切换、时间线缩放和提案差异审阅仍是后续交互能力，不因本轮布局改造视为完成。
 - **交换**：JSON/YAML 导出重新导入语义不变；损坏格式或缺失引用依赖（未登记的 Asset / SubjectRevision）原子拒绝，原数据不变。
 
 真实 E2E/集成证据出现前，所有缺口均不得标记完成。

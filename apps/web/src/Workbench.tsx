@@ -4,40 +4,103 @@ import {
   type CompositionRevisionRecord,
   DomainError,
   type SubjectRecord,
+  type TypedOperation,
 } from "@video-compose/domain";
 import {
   PROTOCOL_VERSION,
-  type ReferencePackEntry,
+  type ShotDefinition,
   serializeCompositionYaml,
-  type SubjectKind,
-  type SubjectSnapshot,
 } from "@video-compose/protocol";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { MediaPreview } from "./MediaPreview.tsx";
+import {
+  AssetLibrary,
+  SubjectLibrary,
+  ShotOverview,
+  shotPreview,
+} from "./WorkspacePanels.tsx";
 
 export type WorkbenchViewMode = "grid" | "list" | "topology";
-
 export interface WorkbenchProps {
   client: VideoComposeClient;
   projectId: string;
   compositionId: string;
   initialView?: WorkbenchViewMode;
 }
-
-const KIND_LABELS: Record<SubjectKind, string> = {
-  character: "角色",
-  prop: "道具",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  approved: "已批准",
-  candidate: "候选中",
-};
-
-const DEP_KIND_LABELS: Record<string, string> = {
-  continuity: "画面连贯 (continuity)",
-  motion: "动作衔接 (motion)",
-  timing: "节奏同步 (timing)",
-};
+type CompositionData = Awaited<
+  ReturnType<VideoComposeClient["getComposition"]>
+>;
+type WorkspaceTab = "shots" | "assets" | "subjects" | "history" | "source";
+interface ShotDraft {
+  description: string;
+  duration: string;
+  image: string;
+  video: string;
+  baseRevision: number;
+  original: ShotDefinition;
+  operationId: string;
+}
+interface UndoEntry {
+  shotId: string;
+  before: ShotDefinition;
+  after: ShotDefinition;
+  fields: Extract<TypedOperation, { op: "update_shot_fields" }>;
+}
+export const newOperationId = (): string => crypto.randomUUID();
+const messageOf = (error: unknown): string =>
+  error instanceof DomainError && error.code === "REVISION_CONFLICT"
+    ? `分镜修改发生冲突，草稿已保留。请对照最新版本后处理。${error.message}`
+    : error instanceof Error
+      ? error.message
+      : String(error);
+const emptyShot = (): ShotDefinition => ({
+  description: "未命名分镜",
+  durationFrames: 90,
+  subjects: [],
+  dependsOn: [],
+  references: { images: [], videos: [] },
+  prompts: {},
+  candidates: { images: [], videos: [], audios: [] },
+  selected: { video: null, audio: null },
+});
+const draftFor = (shot: ShotDefinition, revision: number): ShotDraft => ({
+  description: shot.description,
+  duration: String(shot.durationFrames ?? 90),
+  image: shot.prompts.image ?? "",
+  video: shot.prompts.video ?? "",
+  original: shot,
+  baseRevision: revision,
+  operationId: newOperationId(),
+});
+function changedFields(
+  draft: ShotDraft,
+): Extract<TypedOperation, { op: "update_shot_fields" }> {
+  return {
+    op: "update_shot_fields",
+    shotId: "",
+    ...(draft.description !== draft.original.description
+      ? { description: draft.description }
+      : {}),
+    ...(Number(draft.duration) !== (draft.original.durationFrames ?? 90)
+      ? { durationFrames: Number(draft.duration) }
+      : {}),
+    ...(draft.image !== (draft.original.prompts.image ?? "") ||
+    draft.video !== (draft.original.prompts.video ?? "")
+      ? {
+          prompts: {
+            ...(draft.image !== (draft.original.prompts.image ?? "")
+              ? { image: draft.image }
+              : {}),
+            ...(draft.video !== (draft.original.prompts.video ?? "")
+              ? { video: draft.video }
+              : {}),
+          },
+        }
+      : {}),
+  };
+}
+const isDirty = (draft: ShotDraft): boolean =>
+  Object.keys(changedFields(draft)).length > 2;
 
 export function Workbench({
   client,
@@ -45,1325 +108,1043 @@ export function Workbench({
   compositionId,
   initialView = "grid",
 }: WorkbenchProps): React.ReactElement {
-  const [viewMode, setViewMode] = useState<WorkbenchViewMode>(initialView);
-  const [subjectFilter, setSubjectFilter] = useState<"all" | SubjectKind>("all");
-  const [agentPanelOpen, setAgentPanelOpen] = useState<boolean>(true);
-  const [exportDrawerOpen, setExportDrawerOpen] = useState<boolean>(false);
-  const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
-
-  const [headRevision, setHeadRevision] = useState<number>(0);
-  const [revisionRecord, setRevisionRecord] =
-    useState<CompositionRevisionRecord | null>(null);
-  const [revisionHistory, setRevisionHistory] = useState<
-    CompositionRevisionRecord[]
-  >([]);
-  const [resolvedSubjects, setResolvedSubjects] = useState<
-    Record<
-      string,
-      {
-        subjectId: string;
-        subjectRevision: number;
-        resolvedVariant: string;
-        referencePack: ReferencePackEntry[];
-        snapshot: SubjectSnapshot;
-      }
-    >
-  >({});
+  const [data, setData] = useState<CompositionData | null>(null);
   const [subjects, setSubjects] = useState<SubjectRecord[]>([]);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
-  const [errorBanner, setErrorBanner] = useState<string | null>(null);
-  const [needsBootstrap, setNeedsBootstrap] = useState<boolean>(false);
+  const [history, setHistory] = useState<CompositionRevisionRecord[]>([]);
+  const [canWrite, setCanWrite] = useState(false);
+  const [bootstrap, setBootstrap] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [assetsError, setAssetsError] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
+  const mutationRetries = useRef(
+    new Map<string, { baseRevision: number; operationId: string }>(),
+  );
+  const [tab, setTab] = useState<WorkspaceTab>("shots");
+  const [viewMode, setViewMode] = useState(initialView);
+  const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [shotFilter, setShotFilter] = useState("all");
+  const [drafts, setDrafts] = useState<Record<string, ShotDraft>>({});
+  const [undo, setUndo] = useState<UndoEntry[]>([]);
+  const [focus, setFocus] = useState(false);
+  const [navigationOpen, setNavigationOpen] = useState(true);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [batchSeconds, setBatchSeconds] = useState("3");
+  const [sourceFormat, setSourceFormat] = useState<"yaml" | "json">("yaml");
+  const inspectorRef = useRef<HTMLElement>(null);
+  const doc = data?.revisionRecord.document;
+  const head = data?.headRevision ?? 0;
+  const activeShotId =
+    selectedShotId && doc?.shots[selectedShotId]
+      ? selectedShotId
+      : (doc?.sequence[0] ?? null);
+  const activeShot = activeShotId ? doc?.shots[activeShotId] : undefined;
+  const draft =
+    activeShot && activeShotId
+      ? (drafts[activeShotId] ?? draftFor(activeShot, head))
+      : undefined;
+  const dirtyCount = Object.values(drafts).filter(isDirty).length;
+  const fps = doc?.format.fps ?? 30;
+  const activeIndex =
+    doc && activeShotId ? doc.sequence.indexOf(activeShotId) : -1;
 
-  // Inspector edit states
-  const [editDraftDescription, setEditDraftDescription] = useState<string>("");
-  const [editDraftDuration, setEditDraftDuration] = useState<number>(90);
-  const [editDraftImagePrompt, setEditDraftImagePrompt] = useState<string>("");
-  const [editDraftVideoPrompt, setEditDraftVideoPrompt] = useState<string>("");
-
-  // Quick creation toggles
-  const [showNewSubjectForm, setShowNewSubjectForm] = useState<boolean>(false);
-  const [newSubjectId, setNewSubjectId] = useState<string>("");
-  const [newSubjectName, setNewSubjectName] = useState<string>("");
-  const [newSubjectKind, setNewSubjectKind] =
-    useState<SubjectKind>("character");
-  const [newSubjectDesc, setNewSubjectDesc] = useState<string>("");
-  const [newSubjectInvariants, setNewSubjectInvariants] = useState<string>("");
-
-  const refreshState = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<void> => {
     try {
-      const [compData, subjList] = await Promise.all([
+      const [composition, library, access] = await Promise.all([
         client.getComposition(projectId, compositionId),
         client.listSubjects(projectId),
+        client.getProjectAccess(projectId),
       ]);
-      setNeedsBootstrap(false);
-      setHeadRevision(compData.headRevision);
-      setRevisionRecord(compData.revisionRecord);
-      setResolvedSubjects(compData.resolvedSubjects);
-      setSubjects(subjList);
-
-      const firstShot = compData.revisionRecord.document.sequence[0] ?? null;
-      setSelectedShotId((prev) => prev ?? firstShot);
-
-      void client
-        .getCompositionHistory(projectId, compositionId)
-        .then((hist) => setRevisionHistory(hist.revisions))
-        .catch(() => {});
-      void client
-        .listAssets(projectId)
-        .then((assetList) => setAssets(assetList))
-        .catch(() => {});
+      setData(composition);
+      setSubjects(library);
+      setCanWrite(access.role === "writer");
+      setBootstrap(false);
+      const [assetResult, historyResult] = await Promise.allSettled([
+        client.listAssets(projectId),
+        client.getCompositionHistory(projectId, compositionId),
+      ]);
+      if (assetResult.status === "fulfilled") {
+        setAssets(assetResult.value);
+        setAssetsError(false);
+      } else setAssetsError(true);
+      if (historyResult.status === "fulfilled")
+        setHistory(historyResult.value.revisions);
+      else setNotice("修订历史暂时无法加载，请重试刷新。");
     } catch (err) {
-      if (err instanceof DomainError && err.code === "NOT_FOUND") {
-        setNeedsBootstrap(true);
-        setErrorBanner(null);
-      } else {
-        setErrorBanner(err instanceof Error ? err.message : String(err));
-      }
+      if (err instanceof DomainError && err.code === "NOT_FOUND")
+        setBootstrap(true);
+      else setError(messageOf(err));
     }
   }, [client, projectId, compositionId]);
-
   useEffect(() => {
-    void refreshState();
-  }, [refreshState]);
-
-  const doc = revisionRecord?.document;
-  const activeShotId = selectedShotId ?? doc?.sequence[0] ?? null;
-  const activeShot = activeShotId && doc ? doc.shots[activeShotId] : null;
-
+    void refresh();
+  }, [refresh]);
   useEffect(() => {
-    if (activeShot) {
-      setEditDraftDescription(activeShot.description);
-      setEditDraftDuration(activeShot.durationFrames ?? 90);
-      setEditDraftImagePrompt(activeShot.prompts?.image ?? "");
-      setEditDraftVideoPrompt(activeShot.prompts?.video ?? "");
-    }
-  }, [
-    activeShotId,
-    activeShot?.description,
-    activeShot?.durationFrames,
-    activeShot?.prompts?.image,
-    activeShot?.prompts?.video,
-  ]);
-
-  const handleBootstrapWorkspace = async (): Promise<void> => {
-    setErrorBanner(null);
+    if (!dirtyCount) return;
+    const onLeave = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, [dirtyCount]);
+  const run = async (operation: () => Promise<void>): Promise<void> => {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    setPending(true);
+    setError(null);
+    setNotice("");
     try {
-      try {
-        await client.createProject({
-          id: projectId,
-          name: `项目 ${projectId}`,
-        });
-      } catch (err) {
-        if (!(err instanceof DomainError && err.code === "ALREADY_EXISTS")) {
-          throw err;
-        }
-      }
-
-      await client.createComposition({
-        projectId,
-        document: {
-          apiVersion: PROTOCOL_VERSION,
-          id: compositionId,
-          project: projectId,
-          title: "初始编排工作台",
-          format: { width: 1920, height: 1080, fps: 30 },
-          audioTracks: [],
-          sequence: ["shot-001"],
-          shots: {
-            "shot-001": {
-              description: "开场镜头",
-              durationFrames: 150,
-              dependsOn: [],
-              subjects: [],
-              references: { images: [], videos: [] },
-              prompts: { image: "霓虹雨巷全景开场画面" },
-              candidates: { images: [], videos: [], audios: [] },
-              selected: { video: null, audio: null },
-            },
-          },
-        },
-      });
-      await refreshState();
+      await operation();
     } catch (err) {
-      setErrorBanner(err instanceof Error ? err.message : String(err));
+      setError(messageOf(err));
+      if (err instanceof DomainError && err.code === "REVISION_CONFLICT")
+        await refresh();
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
     }
   };
-
-  const handleSaveShotDescription = async (
-    shotId: string,
-    newDescription: string,
+  const chooseShot = (id: string): void => {
+    setSelectedShotId(id);
+    setTab("shots");
+    inspectorRef.current?.scrollIntoView?.({ block: "start" });
+  };
+  const edit = (
+    changes: Partial<
+      Pick<ShotDraft, "description" | "duration" | "image" | "video">
+    >,
+  ): void => {
+    if (!activeShotId || !activeShot || !canWrite) return;
+    const id = activeShotId;
+    setDrafts((previous) => ({
+      ...previous,
+      [id]: {
+        ...(previous[id] ?? draftFor(activeShot, head)),
+        ...changes,
+        operationId: newOperationId(),
+      },
+    }));
+    setNotice("");
+  };
+  const save = async (): Promise<void> => {
+    if (!activeShotId || !draft || !isDirty(draft)) return;
+    const id = activeShotId;
+    if (
+      !draft.duration.trim() ||
+      !Number.isSafeInteger(Number(draft.duration)) ||
+      Number(draft.duration) <= 0
+    )
+      throw new Error("时长需要填写大于 0 的整数帧数。");
+    const result = await client.patchComposition({
+      projectId,
+      compositionId,
+      baseRevision: draft.baseRevision,
+      operationId: draft.operationId,
+      operations: [{ ...changedFields(draft), shotId: id }],
+      message: `编辑分镜 ${id}`,
+    });
+    setUndo((previous) => [
+      ...previous,
+      {
+        shotId: id,
+        before: draft.original,
+        after: result.revisionRecord.document.shots[id],
+        fields: changedFields(draft),
+      },
+    ]);
+    setData((previous) =>
+      previous
+        ? {
+            ...previous,
+            headRevision: result.revisionRecord.revision,
+            revisionRecord: result.revisionRecord,
+          }
+        : previous,
+    );
+    setDrafts((previous) => {
+      const next = { ...previous };
+      delete next[id];
+      return next;
+    });
+    setNotice(`已保存 ${id} · 修订 #${result.revisionRecord.revision}`);
+    await refresh();
+  };
+  const rebaseDraft = (): void => {
+    if (!draft || !activeShot || !activeShotId) return;
+    const fields = changedFields(draft);
+    const fresh = draftFor(activeShot, head);
+    const reconciled: ShotDraft = {
+      ...fresh,
+      ...(fields.description !== undefined
+        ? { description: draft.description }
+        : {}),
+      ...(fields.durationFrames !== undefined
+        ? { duration: draft.duration }
+        : {}),
+      ...(fields.prompts?.image !== undefined ? { image: draft.image } : {}),
+      ...(fields.prompts?.video !== undefined ? { video: draft.video } : {}),
+    };
+    setDrafts((previous) => ({ ...previous, [activeShotId]: reconciled }));
+    setNotice("已保留你编辑过的字段。请核对差异后再次保存。");
+    setError(null);
+  };
+  const undoEdit = async (): Promise<void> => {
+    const entry = undo.at(-1);
+    if (!entry) return;
+    const current = await client.getComposition(projectId, compositionId);
+    const shot = current.revisionRecord.document.shots[entry.shotId];
+    const fields = (value: ShotDefinition): string =>
+      JSON.stringify([
+        entry.fields.description !== undefined ? value.description : null,
+        entry.fields.durationFrames !== undefined ? value.durationFrames : null,
+        entry.fields.prompts?.image !== undefined
+          ? (value.prompts.image ?? "")
+          : null,
+        entry.fields.prompts?.video !== undefined
+          ? (value.prompts.video ?? "")
+          : null,
+      ]);
+    if (!shot || fields(shot) !== fields(entry.after))
+      throw new Error(
+        "该镜头已有新的修改，未执行撤销。请在协作与历史中对照版本。",
+      );
+    const delta: Extract<TypedOperation, { op: "update_shot_fields" }> = {
+      op: "update_shot_fields",
+      shotId: entry.shotId,
+    };
+    if (entry.fields.description !== undefined)
+      delta.description = entry.before.description;
+    if (entry.fields.durationFrames !== undefined)
+      delta.durationFrames = entry.before.durationFrames;
+    const prompts: { image?: string; video?: string } = {};
+    if (entry.fields.prompts?.image !== undefined)
+      prompts.image = entry.before.prompts.image ?? "";
+    if (entry.fields.prompts?.video !== undefined)
+      prompts.video = entry.before.prompts.video ?? "";
+    if (Object.keys(prompts).length) delta.prompts = prompts;
+    await client.patchComposition({
+      projectId,
+      compositionId,
+      baseRevision: current.headRevision,
+      operationId: newOperationId(),
+      operations: [{ ...delta, shotId: entry.shotId }],
+      message: `撤销本次会话对 ${entry.shotId} 的编辑`,
+    });
+    setUndo((previous) => previous.slice(0, -1));
+    setNotice("已撤销上次编辑，历史修订保留。");
+    await refresh();
+  };
+  const patch = async (
+    operations: TypedOperation[],
+    message: string,
   ): Promise<void> => {
-    if (!revisionRecord) return;
-    setErrorBanner(null);
-    try {
-      await client.patchComposition({
-        projectId,
-        compositionId,
-        baseRevision: headRevision,
-        operationId: `ui-edit-${shotId}-r${headRevision}-${Date.now()}`,
-        operations: [
-          {
-            op: "update_shot_fields",
-            shotId,
-            description: newDescription,
-          },
-        ],
-        message: `修改镜头 ${shotId} 描述`,
-      });
-      await refreshState();
-    } catch (err) {
-      setErrorBanner(err instanceof Error ? err.message : String(err));
-      await refreshState();
-    }
+    const signature = JSON.stringify(operations);
+    const retry = mutationRetries.current.get(signature) ?? {
+      baseRevision: head,
+      operationId: newOperationId(),
+    };
+    mutationRetries.current.set(signature, retry);
+    await client.patchComposition({
+      projectId,
+      compositionId,
+      ...retry,
+      operations,
+      message,
+    });
+    mutationRetries.current.delete(signature);
+    setNotice(message);
+    await refresh();
   };
-
-  const handleSaveShotExtended = async (shotId: string): Promise<void> => {
-    if (!revisionRecord || !activeShot) return;
-    setErrorBanner(null);
-    try {
-      await client.patchComposition({
-        projectId,
-        compositionId,
-        baseRevision: headRevision,
-        operationId: `ui-edit-ext-${shotId}-r${headRevision}-${Date.now()}`,
-        operations: [
-          {
-            op: "update_shot_fields",
-            shotId,
-            description: editDraftDescription,
-            durationFrames: Number(editDraftDuration) || 90,
-            prompts: {
-              ...activeShot.prompts,
-              ...(editDraftImagePrompt.trim()
-                ? { image: editDraftImagePrompt.trim() }
-                : {}),
-              ...(editDraftVideoPrompt.trim()
-                ? { video: editDraftVideoPrompt.trim() }
-                : {}),
-            },
-          },
-        ],
-        message: `更新镜头 ${shotId} 时长与生成提示词`,
-      });
-      await refreshState();
-    } catch (err) {
-      setErrorBanner(err instanceof Error ? err.message : String(err));
-      await refreshState();
-    }
-  };
-
-  const handleAddShot = async (): Promise<void> => {
+  const addShot = async (): Promise<void> => {
     if (!doc) return;
-    setErrorBanner(null);
-    const nextNum = doc.sequence.length + 1;
-    const newShotId = `shot-${String(nextNum).padStart(3, "0")}`;
-    const lastShotId = doc.sequence[doc.sequence.length - 1];
-    try {
-      await client.patchComposition({
-        projectId,
-        compositionId,
-        baseRevision: headRevision,
-        operationId: `ui-add-${newShotId}-r${headRevision}-${Date.now()}`,
-        operations: [
-          {
-            op: "upsert_shot",
-            shotId: newShotId,
-            afterShotId: lastShotId,
-            shot: {
-              description: `新增分镜 #${nextNum}`,
-              durationFrames: 90,
-              dependsOn: lastShotId
-                ? [{ shotId: lastShotId, kind: "continuity" }]
-                : [],
-              subjects: [],
-              references: { images: [], videos: [] },
-              prompts: { image: `分镜 #${nextNum} 画面构图提示词` },
-              candidates: { images: [], videos: [], audios: [] },
-              selected: { video: null, audio: null },
-            },
-          },
-        ],
-        message: `新增分镜 ${newShotId}`,
-      });
-      setSelectedShotId(newShotId);
-      await refreshState();
-    } catch (err) {
-      setErrorBanner(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const handleUndoRevision = async (): Promise<void> => {
-    if (!revisionRecord || headRevision <= 1) return;
-    setErrorBanner(null);
-    try {
-      await client.restoreCompositionRevision({
-        projectId,
-        compositionId,
-        targetRevision: headRevision - 1,
-        operationId: `ui-undo-to-${headRevision - 1}-${Date.now()}`,
-      });
-      await refreshState();
-    } catch (err) {
-      setErrorBanner(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const handleCreateSubject = async (e: React.FormEvent): Promise<void> => {
-    e.preventDefault();
-    if (!newSubjectId.trim() || !newSubjectName.trim()) return;
-    setErrorBanner(null);
-    try {
-      await client.createSubject({
-        projectId,
-        id: newSubjectId.trim(),
-        kind: newSubjectKind,
-        name: newSubjectName.trim(),
-        status: "approved",
-        defaultVariant: "default",
-        definition: {
-          description: newSubjectDesc.trim() || `${newSubjectName.trim()} 设定`,
-          invariants: newSubjectInvariants
-            .split(/[,，]/)
-            .map((s) => s.trim())
-            .filter(Boolean),
+    let number = doc.sequence.length + 1;
+    while (doc.shots[`shot-${String(number).padStart(3, "0")}`]) number++;
+    const id = `shot-${String(number).padStart(3, "0")}`;
+    await patch(
+      [
+        {
+          op: "upsert_shot",
+          shotId: id,
+          afterShotId: activeShotId,
+          shot: emptyShot(),
         },
-        variants: {
-          default: {
-            description: "默认外观造型",
-            referencePack: [],
-          },
+      ],
+      `新增分镜 ${id}`,
+    );
+    setSelectedShotId(id);
+    setTab("shots");
+  };
+  const moveShot = async (direction: -1 | 1): Promise<void> => {
+    if (!doc || !activeShotId) return;
+    await patch(
+      [
+        {
+          op: "reorder_sequence",
+          shotId: activeShotId,
+          afterShotId:
+            direction === -1
+              ? (doc.sequence[activeIndex - 2] ?? null)
+              : doc.sequence[activeIndex + 1],
         },
-      });
-      setShowNewSubjectForm(false);
-      setNewSubjectId("");
-      setNewSubjectName("");
-      setNewSubjectDesc("");
-      setNewSubjectInvariants("");
-      await refreshState();
-    } catch (err) {
-      setErrorBanner(err instanceof Error ? err.message : String(err));
-    }
+      ],
+      `调整 ${activeShotId} 的播放顺序`,
+    );
   };
-
-  const handleBindSubjectToActiveShot = async (
-    subj: SubjectRecord,
-  ): Promise<void> => {
-    if (!activeShotId) return;
-    setErrorBanner(null);
+  const batchDuration = async (): Promise<void> => {
+    const frames = Math.round(Number(batchSeconds) * fps);
+    if (!selectedIds.length || !Number.isSafeInteger(frames) || frames <= 0)
+      throw new Error("请选择镜头并填写有效秒数。");
+    if (selectedIds.some((id) => drafts[id] && isDirty(drafts[id])))
+      throw new Error("选中的镜头还有草稿，请先保存或放弃草稿。");
+    await patch(
+      selectedIds.map((shotId) => ({
+        op: "update_shot_fields",
+        shotId,
+        durationFrames: frames,
+      })),
+      `批量修改 ${selectedIds.length} 个镜头时长`,
+    );
+    setSelectedIds([]);
+  };
+  const download = async (): Promise<void> => {
+    const exported = await client.exportCompositionBundle({
+      projectId,
+      compositionId,
+      format: sourceFormat,
+    });
+    const url = URL.createObjectURL(
+      new Blob([exported.serialized], {
+        type: sourceFormat === "json" ? "application/json" : "application/yaml",
+      }),
+    );
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${compositionId}.${sourceFormat}`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+  const bootstrapWorkspace = async (): Promise<void> => {
     try {
-      await client.patchComposition({
-        projectId,
-        compositionId,
-        baseRevision: headRevision,
-        operationId: `ui-bind-${activeShotId}-${subj.id}-${Date.now()}`,
-        operations: [
-          {
-            op: "bind_shot_subject",
-            shotId: activeShotId,
-            binding: {
-              subjectId: subj.id,
-              subjectRevision: subj.latestRevision,
-            },
-          },
-        ],
-        message: `绑定设定 ${subj.id}@v${subj.latestRevision} 至镜头 ${activeShotId}`,
-      });
-      await refreshState();
+      await client.createProject({ id: projectId, name: `项目 ${projectId}` });
     } catch (err) {
-      setErrorBanner(err instanceof Error ? err.message : String(err));
+      if (!(err instanceof DomainError && err.code === "ALREADY_EXISTS"))
+        throw err;
     }
+    await client.createComposition({
+      projectId,
+      document: {
+        apiVersion: PROTOCOL_VERSION,
+        id: compositionId,
+        project: projectId,
+        title: "初始编排工作台",
+        format: { width: 1920, height: 1080, fps: 30 },
+        audioTracks: [],
+        sequence: ["shot-001"],
+        shots: { "shot-001": emptyShot() },
+      },
+    });
+    await refresh();
   };
-
-  if (needsBootstrap && (!doc || !revisionRecord)) {
+  if (!doc || !data)
     return (
-      <div
-        className="vc-bootstrap-screen"
-        data-testid="empty-workspace-bootstrap"
-      >
-        <div className="vc-bootstrap-card">
-          <div className="vc-brand" style={{ marginBottom: 16 }}>
-            视频编排工作台
+      <div className="welcome">
+        <img src="/logo.svg" alt="Video Compose" width="48" height="48" />
+        <h1>Video Compose</h1>
+        {bootstrap ? (
+          <div data-testid="empty-workspace-bootstrap">
+            <p>创建项目与第一条分镜编排，开始整理你的作品。</p>
+            <button
+              className="primary"
+              data-testid="btn-bootstrap-project"
+              disabled={pending}
+              onClick={() => void run(bootstrapWorkspace)}
+            >
+              初始化项目与首条编排
+            </button>
           </div>
-          <h2 style={{ marginTop: 0, marginBottom: 8 }}>
-            项目「{projectId}」尚未初始化
-          </h2>
-          <p style={{ color: "var(--text-secondary)", marginBottom: 20 }}>
-            当前 Cloudflare D1 工作区尚未创建默认项目与首条分镜编排，点击下方按钮一键初始化。
+        ) : (
+          <p role="status">正在加载工作台…</p>
+        )}
+        {error && (
+          <p role="alert" data-testid="workbench-error">
+            {error}
           </p>
-          {errorBanner && (
-            <div
-              role="alert"
-              className="vc-alert-error"
-              data-testid="workbench-error"
-              style={{ marginBottom: 16 }}
-            >
-              {errorBanner}
-            </div>
-          )}
-          <button
-            type="button"
-            className="vc-btn vc-btn-primary"
-            data-testid="btn-bootstrap-project"
-            onClick={() => void handleBootstrapWorkspace()}
-          >
-            初始化项目与首条编排
-          </button>
-        </div>
+        )}
+        <button onClick={() => void refresh()}>重新加载</button>
       </div>
     );
-  }
 
-  if (!doc || !revisionRecord) {
-    return (
-      <div className="vc-bootstrap-screen" data-testid="workbench-loading">
-        <div className="vc-bootstrap-card">
-          {errorBanner ? (
-            <div
-              role="alert"
-              className="vc-alert-error"
-              data-testid="workbench-error"
-            >
-              {errorBanner}
-            </div>
-          ) : (
-            <div>正在加载视频编排工作台...</div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  const orderedShots = doc.sequence.map((id, idx) => ({
+  const orderedShots = doc.sequence.map((id, index) => ({
     id,
-    index: idx + 1,
     shot: doc.shots[id],
+    index,
   }));
-
+  const visibleShots = orderedShots.filter(
+    ({ id, shot }) =>
+      `${id} ${shot.description} ${shot.prompts.image ?? ""} ${shot.prompts.video ?? ""}`
+        .toLowerCase()
+        .includes(query.toLowerCase()) &&
+      (shotFilter === "all" ||
+        (shotFilter === "draft"
+          ? !!drafts[id] && isDirty(drafts[id])
+          : !shot.selected.video && !shot.selected.audio)),
+  );
   const totalFrames = orderedShots.reduce(
-    (sum, item) => sum + (item.shot?.durationFrames ?? 0),
+    (sum, { shot }) => sum + (shot.durationFrames ?? 0),
     0,
   );
-  const fps = doc.format?.fps ?? 30;
-  const totalSeconds = (totalFrames / fps).toFixed(1);
-
-  const dependencyEdges = orderedShots.flatMap(({ id, shot }) =>
-    shot.dependsOn.map((dep) => ({
-      fromShotId: dep.shotId,
-      toShotId: id,
-      kind: dep.kind,
-    })),
-  );
-
-  const filteredSubjects = subjects.filter((s) =>
-    subjectFilter === "all" ? true : s.kind === subjectFilter,
-  );
-
+  const preview = activeShot ? shotPreview(activeShot, assets) : undefined;
+  const activeBindings =
+    activeShot?.subjects
+      .map((binding) =>
+        Object.values(data.resolvedSubjects).find(
+          (subject) =>
+            subject.subjectId === binding.subjectId &&
+            subject.subjectRevision === binding.subjectRevision &&
+            subject.resolvedVariant ===
+              (binding.variant ??
+                subject.snapshot.defaultVariant ??
+                Object.keys(subject.snapshot.variants)[0]),
+        ),
+      )
+      .filter((value) => value !== undefined) ?? [];
+  const contentUrl = (asset: AssetRecord): string =>
+    client.assetContentUrl(projectId, asset.id);
+  const toggleSelection = (id: string): void =>
+    setSelectedIds((previous) =>
+      previous.includes(id)
+        ? previous.filter((item) => item !== id)
+        : [...previous, id],
+    );
+  const tabs = [
+    ["shots", "分镜"],
+    ["assets", "素材"],
+    ["subjects", "角色与道具"],
+    ["history", "协作与历史"],
+    ["source", "协议"],
+  ] as const;
   return (
-    <div className="vc-workbench" data-testid="video-compose-workbench">
-      {/* 顶部工作台导航栏 */}
-      <header className="vc-header">
-        <div className="vc-header-left">
-          <span className="vc-brand">视频编排工作台</span>
-          <div className="vc-title-group">
-            <h1 className="vc-title" data-testid="composition-title">
-              {doc.title ?? doc.id}
-            </h1>
-            <span
-              className="vc-badge vc-badge-revision"
-              data-testid="composition-revision"
-            >
-              修订 #{headRevision}
-            </span>
-            <span className="vc-badge">
-              {doc.format.width}×{doc.format.height} · {fps}帧/秒
-            </span>
-            <span className="vc-badge vc-badge-indigo">
-              {orderedShots.length} 个镜头 · {totalFrames}帧（{totalSeconds}秒）
-            </span>
-          </div>
+    <div
+      className={`workbench ${focus ? "focus-mode" : ""} ${!navigationOpen ? "navigation-hidden" : ""}`}
+      data-testid="video-compose-workbench"
+    >
+      <header className="app-header">
+        <a className="brand" href="/" aria-label="Video Compose 首页">
+          <img src="/logo.svg" alt="" width="34" height="34" />
+          <span>
+            Video Compose<small>作品编排与协作</small>
+          </span>
+        </a>
+        <div className="composition-heading">
+          <span className="breadcrumb">
+            {projectId} / {compositionId}
+          </span>
+          <h1 data-testid="composition-title">{doc.title ?? doc.id}</h1>
         </div>
-
-        <nav className="vc-view-switcher" aria-label="视图切换">
-          <button
-            type="button"
-            className={`vc-tab-btn ${viewMode === "grid" ? "active" : ""}`}
-            data-testid="tab-grid"
-            onClick={() => setViewMode("grid")}
-          >
-            分镜网格
-          </button>
-          <button
-            type="button"
-            className={`vc-tab-btn ${viewMode === "list" ? "active" : ""}`}
-            data-testid="tab-list"
-            onClick={() => setViewMode("list")}
-          >
-            编排清单
-          </button>
-          <button
-            type="button"
-            className={`vc-tab-btn ${viewMode === "topology" ? "active" : ""}`}
-            data-testid="tab-topology"
-            onClick={() => setViewMode("topology")}
-          >
-            依赖拓扑
-          </button>
-        </nav>
-
-        <div className="vc-header-actions">
-          <button
-            type="button"
-            className="vc-btn vc-btn-primary"
-            data-testid="btn-add-shot"
-            onClick={() => void handleAddShot()}
-          >
-            + 新增分镜
-          </button>
-          <button
-            type="button"
-            className="vc-btn"
-            data-testid="btn-toggle-export"
-            onClick={() => setExportDrawerOpen((prev) => !prev)}
-          >
-            {exportDrawerOpen ? "收起 YAML 协议" : "YAML / JSON 协议"}
-          </button>
-          <button
-            type="button"
-            className="vc-btn"
-            data-testid="btn-undo"
-            disabled={headRevision <= 1}
-            onClick={() => void handleUndoRevision()}
-          >
-            撤销上一修订
-          </button>
-          <button
-            type="button"
-            className="vc-btn"
-            data-testid="btn-toggle-agent"
-            onClick={() => setAgentPanelOpen((prev) => !prev)}
-          >
-            {agentPanelOpen ? "隐藏协作侧栏" : "显示协作侧栏"}
-          </button>
+        <div className="header-meta">
+          <span className="badge" data-testid="composition-revision">
+            修订 #{head}
+          </span>
+          <span>{canWrite ? "可编辑" : "只读"}</span>
+          <span>
+            {doc.sequence.length} 镜头 · {(totalFrames / fps).toFixed(1)} 秒
+          </span>
         </div>
-      </header>
-
-      {errorBanner && (
-        <div
-          role="alert"
-          className="vc-alert-error"
-          data-testid="workbench-error"
+        <button
+          onClick={() => {
+            setError(null);
+            void refresh();
+          }}
+          disabled={pending}
         >
-          <span>{errorBanner}</span>
-          <button
-            type="button"
-            className="vc-btn vc-btn-sm"
-            onClick={() => setErrorBanner(null)}
-          >
-            关闭
-          </button>
+          刷新
+        </button>
+      </header>
+      {error && (
+        <div role="alert" className="alert" data-testid="workbench-error">
+          <span>
+            {error}
+            <small>草稿已保留。可重试原操作，或刷新后对照最新版本。</small>
+          </span>
+          <button onClick={() => setError(null)}>关闭</button>
         </div>
       )}
-
-      {/* 三栏主工作区 */}
-      <div className="vc-studio-body">
-        {/* 左侧栏：角色/道具设定库与不可变资产库 */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <section className="vc-panel" data-testid="subject-library">
-            <div className="vc-panel-header">
-              <h2 className="vc-panel-title">
-                <span>角色与道具设定库</span>
-                <span className="vc-badge">{subjects.length}</span>
-              </h2>
-              <button
-                type="button"
-                className="vc-btn vc-btn-sm"
-                onClick={() => setShowNewSubjectForm((prev) => !prev)}
-              >
-                {showNewSubjectForm ? "取消" : "+ 新建设定"}
-              </button>
-            </div>
-            <div className="vc-panel-body">
+      <div className="workspace">
+        <aside className="shot-sidebar" aria-label="镜头导航">
+          <div className="sidebar-title">
+            <strong>镜头导航</strong>
+            <button
+              data-testid="btn-add-shot"
+              onClick={() => void run(addShot)}
+              disabled={!canWrite || pending}
+              aria-label="在当前镜头后新增分镜"
+            >
+              ＋ 新增
+            </button>
+          </div>
+          <label className="search-field">
+            <span>查找镜头</span>
+            <input
+              type="search"
+              aria-label="搜索镜头"
+              placeholder="名称、编号或提示词"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <select
+            aria-label="镜头筛选"
+            value={shotFilter}
+            onChange={(event) => setShotFilter(event.target.value)}
+          >
+            <option value="all">全部镜头（{doc.sequence.length}）</option>
+            <option value="draft">有未保存草稿</option>
+            <option value="missing">尚未选用输出</option>
+          </select>
+          <div className="shot-navigation-list">
+            {visibleShots.map(({ id, shot, index }) => (
               <div
-                style={{
-                  display: "flex",
-                  gap: 6,
-                  marginBottom: 12,
-                }}
+                className={`shot-navigation-row ${id === activeShotId ? "selected" : ""}`}
+                key={id}
               >
+                <input
+                  type="checkbox"
+                  aria-label={`批量选择 ${id}`}
+                  checked={selectedIds.includes(id)}
+                  disabled={!canWrite || pending}
+                  onChange={() => toggleSelection(id)}
+                />
                 <button
-                  type="button"
-                  className={`vc-btn vc-btn-sm ${subjectFilter === "all" ? "vc-btn-primary" : ""}`}
-                  data-testid="filter-all"
-                  onClick={() => setSubjectFilter("all")}
+                  className="shot-nav-button"
+                  onClick={() => chooseShot(id)}
+                  aria-current={id === activeShotId ? "true" : undefined}
+                  data-testid={`navigate-${id}`}
                 >
-                  全部
-                </button>
-                <button
-                  type="button"
-                  className={`vc-btn vc-btn-sm ${subjectFilter === "character" ? "vc-btn-primary" : ""}`}
-                  data-testid="filter-character"
-                  onClick={() => setSubjectFilter("character")}
-                >
-                  角色
-                </button>
-                <button
-                  type="button"
-                  className={`vc-btn vc-btn-sm ${subjectFilter === "prop" ? "vc-btn-primary" : ""}`}
-                  data-testid="filter-prop"
-                  onClick={() => setSubjectFilter("prop")}
-                >
-                  道具
+                  <span className="shot-number">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <span>
+                    <strong>{shot.description || "未命名分镜"}</strong>
+                    <small>
+                      {id} · {((shot.durationFrames ?? 0) / fps).toFixed(1)} 秒
+                      {drafts[id] && isDirty(drafts[id]) ? " · 未保存" : ""}
+                    </small>
+                  </span>
                 </button>
               </div>
-
-              {showNewSubjectForm && (
-                <form
-                  onSubmit={(e) => void handleCreateSubject(e)}
-                  style={{
-                    padding: 12,
-                    background: "var(--bg-input)",
-                    borderRadius: "var(--radius-md)",
-                    border: "1px solid var(--border-subtle)",
-                    marginBottom: 12,
-                  }}
+            ))}
+            {!visibleShots.length && (
+              <p className="empty-state">没有匹配的镜头</p>
+            )}
+          </div>
+          <div className="sidebar-footer">
+            {dirtyCount ? `${dirtyCount} 个镜头有未保存草稿` : "所有镜头已保存"}
+            <small>草稿保留在当前页面，离开前请保存。</small>
+          </div>
+        </aside>
+        <main className="main-workspace">
+          <div
+            className="workspace-tabs"
+            role="tablist"
+            aria-label="工作内容"
+            onKeyDown={(event) => {
+              if (
+                !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
+              )
+                return;
+              const buttons = Array.from(
+                event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                  '[role="tab"]',
+                ),
+              );
+              const index = buttons.indexOf(event.target as HTMLButtonElement);
+              if (index < 0) return;
+              event.preventDefault();
+              const next =
+                event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? buttons.length - 1
+                    : (index +
+                        (event.key === "ArrowRight" ? 1 : buttons.length - 1)) %
+                      buttons.length;
+              buttons[next].click();
+              buttons[next].focus();
+            }}
+          >
+            {tabs.map(([value, label]) => (
+              <button
+                key={value}
+                role="tab"
+                id={`workspace-${value}`}
+                aria-controls={`workspace-panel-${value}`}
+                aria-selected={tab === value}
+                tabIndex={tab === value ? 0 : -1}
+                onClick={() => setTab(value)}
+              >
+                {label}
+              </button>
+            ))}
+            <button
+              className="navigation-toggle"
+              onClick={() => setNavigationOpen(!navigationOpen)}
+              aria-expanded={navigationOpen}
+            >
+              {navigationOpen ? "收起导航" : "展开导航"}
+            </button>
+          </div>
+          <div className="workspace-content">
+            <section
+              role="tabpanel"
+              id="workspace-panel-shots"
+              aria-labelledby="workspace-shots"
+              hidden={tab !== "shots"}
+            >
+              {activeShotId && activeShot && draft && (
+                <section
+                  className="shot-editor"
+                  ref={inspectorRef}
+                  data-testid="shot-inspector"
                 >
-                  <div className="vc-field">
-                    <label className="vc-label">设定标识 ID</label>
-                    <input
-                      className="vc-input"
-                      placeholder="例如: prop-drone"
-                      value={newSubjectId}
-                      onChange={(e) => setNewSubjectId(e.target.value)}
-                    />
-                  </div>
-                  <div className="vc-field">
-                    <label className="vc-label">名称与类型</label>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <input
-                        className="vc-input"
-                        placeholder="设定名称（如：侦察无人机）"
-                        value={newSubjectName}
-                        onChange={(e) => setNewSubjectName(e.target.value)}
-                      />
-                      <select
-                        className="vc-select"
-                        style={{ width: 100 }}
-                        value={newSubjectKind}
-                        onChange={(e) =>
-                          setNewSubjectKind(e.target.value as SubjectKind)
+                  <div className="editor-heading">
+                    <div>
+                      <span className="eyebrow">
+                        镜头 {String(activeIndex + 1).padStart(2, "0")} /{" "}
+                        {doc.sequence.length} · {activeShotId}
+                      </span>
+                      <h2>分镜工作页</h2>
+                    </div>
+                    <div className="toolbar">
+                      <button
+                        aria-label="上一镜头"
+                        disabled={activeIndex <= 0}
+                        onClick={() =>
+                          chooseShot(doc.sequence[activeIndex - 1])
                         }
                       >
-                        <option value="character">角色</option>
-                        <option value="prop">道具</option>
-                      </select>
+                        ← 上一镜
+                      </button>
+                      <button
+                        aria-label="下一镜头"
+                        disabled={activeIndex >= doc.sequence.length - 1}
+                        onClick={() =>
+                          chooseShot(doc.sequence[activeIndex + 1])
+                        }
+                      >
+                        下一镜 →
+                      </button>
+                      <button
+                        aria-pressed={focus}
+                        onClick={() => setFocus(!focus)}
+                      >
+                        {focus ? "退出专注" : "专注编辑"}
+                      </button>
                     </div>
                   </div>
-                  <div className="vc-field">
-                    <label className="vc-label">视觉设定描述</label>
-                    <input
-                      className="vc-input"
-                      placeholder="核心外观、材质与时代风格..."
-                      value={newSubjectDesc}
-                      onChange={(e) => setNewSubjectDesc(e.target.value)}
-                    />
-                  </div>
-                  <div className="vc-field">
-                    <label className="vc-label">不变量特征（逗号分隔）</label>
-                    <input
-                      className="vc-input"
-                      placeholder="例如：黄色防水雨衣，赛博邮差斜挎包"
-                      value={newSubjectInvariants}
-                      onChange={(e) => setNewSubjectInvariants(e.target.value)}
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="vc-btn vc-btn-primary vc-btn-sm"
-                    style={{ width: "100%" }}
-                  >
-                    创建并冻结为权威版本
-                  </button>
-                </form>
-              )}
-
-              <ul
-                style={{
-                  listStyle: "none",
-                  padding: 0,
-                  margin: 0,
-                }}
-              >
-                {filteredSubjects.map((subj) => {
-                  const latestSnap = subj.revisions[subj.latestRevision];
-                  const variantNames = Object.keys(latestSnap?.variants ?? {});
-                  const kindText = KIND_LABELS[subj.kind] ?? subj.kind;
-                  const statusText =
-                    STATUS_LABELS[latestSnap?.status ?? ""] ??
-                    latestSnap?.status;
-                  return (
-                    <li
-                      key={subj.id}
-                      className="vc-subject-card"
-                      data-testid={`library-subject-${subj.id}`}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
-                        <strong style={{ fontSize: 13.5 }}>
-                          {subj.name}（{kindText}）— 第 {subj.latestRevision} 版 [
-                          {statusText}]
-                        </strong>
+                  <div className="editor-columns">
+                    <div className="preview-column">
+                      <div className="preview-caption">
+                        <strong>素材预览</strong>
+                        <span>{preview?.label}</span>
                       </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          flexWrap: "wrap",
-                          gap: 5,
-                        }}
-                      >
-                        <span className="vc-badge">{subj.id}</span>
-                        <span
-                          className={`vc-badge ${
-                            latestSnap?.status === "approved"
-                              ? "vc-badge-approved"
-                              : "vc-badge-candidate"
-                          }`}
-                        >
-                          {statusText}
-                        </span>
-                        {latestSnap?.defaultVariant && (
-                          <span className="vc-badge vc-badge-indigo">
-                            默认变体：{latestSnap.defaultVariant}
-                          </span>
-                        )}
-                      </div>
-                      {latestSnap?.definition?.description && (
-                        <div
-                          style={{
-                            fontSize: 12,
-                            color: "var(--text-secondary)",
-                          }}
-                        >
-                          {latestSnap.definition.description}
-                        </div>
-                      )}
-                      {latestSnap?.definition?.invariants &&
-                        latestSnap.definition.invariants.length > 0 && (
-                          <div
-                            style={{
-                              display: "flex",
-                              flexWrap: "wrap",
-                              gap: 4,
-                            }}
-                          >
-                            {latestSnap.definition.invariants.map((inv) => (
-                              <span
-                                key={inv}
-                                className="vc-badge"
-                                style={{ fontSize: 10.5 }}
-                              >
-                                🔒 {inv}
-                              </span>
-                            ))}
+                      <div className="hero-preview">
+                        {preview?.asset ? (
+                          tab === "shots" && (
+                            <MediaPreview
+                              key={preview.asset.id}
+                              asset={preview.asset}
+                              url={contentUrl(preview.asset)}
+                            />
+                          )
+                        ) : (
+                          <div className="preview-empty">
+                            <span aria-hidden="true">▧</span>
+                            <strong>给这个镜头添加画面</strong>
+                            <p>关联参考图，或预览 Agent 交付的候选素材。</p>
+                            <button onClick={() => setTab("assets")}>
+                              打开素材库
+                            </button>
                           </div>
                         )}
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          marginTop: 4,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 11,
-                            color: "var(--text-muted)",
-                          }}
-                        >
-                          可选变体：
-                          {variantNames.length > 0
-                            ? variantNames.join("、")
-                            : "默认"}
-                        </span>
-                        {activeShotId && latestSnap?.status === "approved" && (
+                      </div>
+                      <div className="reference-heading">
+                        <h3>角色与参考</h3>
+                        <span>固定版本</span>
+                      </div>
+                      <div data-testid="inspector-resolved-subjects">
+                        {activeBindings.length ? (
+                          activeBindings.map((subject) => (
+                            <div
+                              className="bound-subject"
+                              key={`${subject.subjectId}@${subject.subjectRevision}#${subject.resolvedVariant}`}
+                              data-testid={`resolved-subj-${subject.subjectId}`}
+                            >
+                              <strong>
+                                {subject.snapshot.name}
+                                <span className="badge">
+                                  v{subject.subjectRevision} ·{" "}
+                                  {subject.resolvedVariant}
+                                </span>
+                              </strong>
+                              <div className="reference-thumbnails">
+                                {subject.referencePack.map((reference) => {
+                                  const asset = assets.find(
+                                    (item) => item.id === reference.asset,
+                                  );
+                                  return asset ? (
+                                    <MediaPreview
+                                      key={asset.id}
+                                      compact
+                                      asset={asset}
+                                      url={contentUrl(asset)}
+                                    />
+                                  ) : (
+                                    <span key={reference.asset}>
+                                      参考素材暂不可用
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="empty-state">
+                            此镜头尚未绑定角色或道具。
+                            <button onClick={() => setTab("subjects")}>
+                              选择设定
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div className="reference-thumbnails">
+                        {[
+                          ...activeShot.references.images,
+                          ...activeShot.references.videos,
+                        ].map((reference) => {
+                          const asset = assets.find(
+                            (item) => item.id === reference.asset,
+                          );
+                          return asset ? (
+                            <MediaPreview
+                              key={asset.id}
+                              compact
+                              asset={asset}
+                              url={contentUrl(asset)}
+                            />
+                          ) : null;
+                        })}
+                      </div>
+                    </div>
+                    <div className="editor-form">
+                      <fieldset disabled={!canWrite || pending}>
+                        <label htmlFor="shot-description">分镜描述</label>
+                        <textarea
+                          id="shot-description"
+                          rows={2}
+                          data-testid="inspector-desc-input"
+                          value={draft.description}
+                          onChange={(event) =>
+                            edit({ description: event.target.value })
+                          }
+                        />
+                        <div className="duration-row">
+                          <label htmlFor="shot-duration">
+                            时长{" "}
+                            <span>
+                              {Number.isFinite(Number(draft.duration))
+                                ? (Number(draft.duration) / fps).toFixed(2)
+                                : "—"}{" "}
+                              秒 · {fps} fps
+                            </span>
+                          </label>
+                          <input
+                            id="shot-duration"
+                            aria-label="持续帧数"
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={draft.duration}
+                            onChange={(event) =>
+                              edit({ duration: event.target.value })
+                            }
+                          />
+                          <span>帧</span>
+                        </div>
+                        <label htmlFor="image-prompt">画面提示词</label>
+                        <textarea
+                          id="image-prompt"
+                          rows={8}
+                          placeholder="描述首帧或参考画面构图..."
+                          value={draft.image}
+                          onChange={(event) =>
+                            edit({ image: event.target.value })
+                          }
+                        />
+                        <label htmlFor="video-prompt">运镜提示词</label>
+                        <textarea
+                          id="video-prompt"
+                          rows={5}
+                          placeholder="描述镜头运动与人物动作..."
+                          value={draft.video}
+                          onChange={(event) =>
+                            edit({ video: event.target.value })
+                          }
+                        />
+                      </fieldset>
+                      {isDirty(draft) && draft.baseRevision < head && (
+                        <details className="draft-conflict">
+                          <summary>
+                            对照最新修订 #{head}（草稿基于 #{draft.baseRevision}
+                            ）
+                          </summary>
+                          <p>服务器当前描述：{activeShot.description}</p>
+                          <pre>
+                            {activeShot.prompts.image || "无画面提示词"}
+                          </pre>
+                          <pre>
+                            {activeShot.prompts.video || "无运镜提示词"}
+                          </pre>
                           <button
-                            type="button"
-                            className="vc-btn vc-btn-sm"
+                            data-testid="rebase-draft"
+                            onClick={rebaseDraft}
+                            disabled={pending}
+                          >
+                            保留已编辑字段，基于最新修订重新核对
+                          </button>
+                        </details>
+                      )}
+                      <div className="save-bar">
+                        <span aria-live="polite" data-testid="save-status">
+                          {!canWrite
+                            ? "只读访问"
+                            : pending
+                              ? "正在提交…"
+                              : isDirty(draft)
+                                ? `未保存 · 基于修订 #${draft.baseRevision}`
+                                : "当前镜头已保存"}
+                        </span>
+                        <div>
+                          <button
+                            disabled={!isDirty(draft) || pending}
                             onClick={() =>
-                              void handleBindSubjectToActiveShot(subj)
+                              setDrafts((previous) => {
+                                const next = { ...previous };
+                                delete next[activeShotId];
+                                return next;
+                              })
                             }
                           >
-                            绑定至 {activeShotId}
+                            放弃草稿
                           </button>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          </section>
-
-          {/* 不可变资产库 */}
-          <section className="vc-panel">
-            <div className="vc-panel-header">
-              <h2 className="vc-panel-title">
-                <span>不可变资产库（R2 SHA-256）</span>
-                <span className="vc-badge">{assets.length}</span>
-              </h2>
-            </div>
-            <div className="vc-panel-body">
-              {assets.length === 0 ? (
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  暂无已登记媒体资产
-                </div>
-              ) : (
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 8 }}
-                >
-                  {assets.map((asset) => (
-                    <div
-                      key={asset.id}
-                      style={{
-                        padding: "8px 10px",
-                        background: "var(--bg-card)",
-                        border: "1px solid var(--border-subtle)",
-                        borderRadius: "var(--radius-sm)",
-                        fontSize: 12,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          fontWeight: 600,
-                        }}
-                      >
-                        <span>{asset.id}</span>
-                        <span className="vc-badge vc-badge-cyan">
-                          {asset.mimeType}
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "var(--text-muted)",
-                          fontFamily: "monospace",
-                          marginTop: 4,
-                        }}
-                      >
-                        SHA-256：{asset.sha256.slice(0, 16)}…
+                          <button
+                            className="primary"
+                            data-testid="inspector-save-btn"
+                            disabled={!canWrite || pending || !isDirty(draft)}
+                            onClick={() => void run(save)}
+                          >
+                            保存当前分镜
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  ))}
+                  </div>
+                </section>
+              )}
+              {selectedIds.length > 0 && (
+                <div className="batch-toolbar">
+                  <strong>已选择 {selectedIds.length} 个镜头</strong>
+                  <label>
+                    统一时长（秒）
+                    <input
+                      aria-label="批量时长秒数"
+                      type="number"
+                      min="0.1"
+                      step="0.1"
+                      value={batchSeconds}
+                      onChange={(event) => setBatchSeconds(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    onClick={() => void run(batchDuration)}
+                    disabled={!canWrite || pending}
+                  >
+                    应用时长
+                  </button>
+                  <button onClick={() => setSelectedIds([])}>取消选择</button>
                 </div>
               )}
-            </div>
-          </section>
-        </div>
-
-        {/* 中间主舞台：时间线轨道 + 协议源码抽屉 + 三视图画布 */}
-        <div>
-          <div className="vc-timeline-strip">
-            <div className="vc-timeline-header">
-              <span>
-                <strong>时间线播放序列</strong> · 共 {orderedShots.length} 个镜头 ·{" "}
-                {totalFrames} 帧（{totalSeconds} 秒）
-              </span>
-              <span>点击时间块切换当前选中镜头</span>
-            </div>
-            <div className="vc-timeline-track">
-              {orderedShots.map(({ id, index, shot }) => {
-                const dur = shot?.durationFrames ?? 60;
-                const flexGrow = Math.max(1, Math.round(dur / 15));
-                const isSelected = id === activeShotId;
-                return (
-                  <div
-                    key={id}
-                    className={`vc-timeline-segment ${isSelected ? "selected" : ""}`}
-                    style={{ flexGrow }}
-                    onClick={() => setSelectedShotId(id)}
-                  >
-                    <span className="vc-timeline-seg-id">
-                      #{String(index).padStart(2, "0")} {id}
-                    </span>
-                    <span className="vc-timeline-seg-meta">
-                      {dur}帧（{(dur / fps).toFixed(1)}秒）
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {exportDrawerOpen && (
-            <div className="vc-panel" style={{ marginBottom: 16 }}>
-              <div className="vc-panel-header">
-                <h2 className="vc-panel-title">
-                  可移植声明式编排协议源码（YAML — {PROTOCOL_VERSION}）
-                </h2>
-              </div>
-              <div className="vc-panel-body">
-                <pre className="vc-code-box">
-                  {serializeCompositionYaml(doc)}
-                </pre>
-              </div>
-            </div>
-          )}
-
-          <main data-testid={`view-${viewMode}`}>
-            {viewMode === "grid" && (
-              <section className="vc-shot-grid" aria-label="分镜网格">
-                {orderedShots.map(({ id, index, shot }) => {
-                  const isSelected = id === activeShotId;
-                  const dur = shot.durationFrames ?? 0;
-                  return (
-                    <article
-                      key={id}
-                      className={`vc-shot-card ${isSelected ? "selected" : ""}`}
-                      data-testid={`grid-shot-${id}`}
-                      onClick={() => {
-                        setSelectedShotId(id);
-                        setEditDraftDescription(shot.description);
-                      }}
-                    >
-                      <div className="vc-shot-preview">
-                        <div className="vc-shot-preview-top">
-                          <span className="vc-shot-index">
-                            镜头 #{String(index).padStart(2, "0")}
-                          </span>
-                          <span className="vc-badge">
-                            时长：{dur}帧（{(dur / fps).toFixed(1)}秒）
-                          </span>
-                        </div>
-                        <div className="vc-shot-prompt-overlay">
-                          {shot.prompts?.image ||
-                            shot.prompts?.video ||
-                            shot.description}
-                        </div>
-                      </div>
-
-                      <div className="vc-shot-body">
-                        <div className="vc-shot-title-row">
-                          <h3 className="vc-shot-id">{id}</h3>
-                          {shot.dependsOn.length > 0 && (
-                            <span className="vc-badge vc-badge-indigo">
-                              依赖：
-                              {shot.dependsOn.map((d) => d.shotId).join("、")}
-                            </span>
-                          )}
-                        </div>
-
-                        <p
-                          className="vc-shot-desc"
-                          data-testid={`shot-desc-${id}`}
-                        >
-                          {shot.description}
-                        </p>
-
-                        <ul
-                          className="vc-tag-list"
-                          data-testid={`shot-subjects-${id}`}
-                        >
-                          {shot.subjects.map((b) => (
-                            <li
-                              key={`${b.subjectId}@${b.subjectRevision}`}
-                              className="vc-badge vc-badge-approved"
-                            >
-                              {b.subjectId}@v{b.subjectRevision}（
-                              {b.variant ?? "默认"}）
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    </article>
-                  );
-                })}
-              </section>
-            )}
-
-            {viewMode === "list" && (
-              <section className="vc-panel" aria-label="分镜与音轨总表">
-                <div className="vc-panel-header">
-                  <h2 className="vc-panel-title">分镜与全局音轨总表</h2>
+              {tab === "shots" && (
+                <ShotOverview
+                  document={doc}
+                  visibleShots={visibleShots}
+                  activeShotId={activeShotId}
+                  viewMode={viewMode}
+                  onView={setViewMode}
+                  onChoose={chooseShot}
+                  assets={assets}
+                  contentUrl={contentUrl}
+                  onMove={(direction) => void run(() => moveShot(direction))}
+                  canMove={!pending && canWrite}
+                />
+              )}
+            </section>
+            <section
+              role="tabpanel"
+              id="workspace-panel-assets"
+              aria-labelledby="workspace-assets"
+              hidden={tab !== "assets"}
+            >
+              <AssetLibrary
+                client={client}
+                projectId={projectId}
+                activeShotId={activeShotId}
+                assets={assets}
+                failed={assetsError}
+                active={tab === "assets"}
+                onRefresh={refresh}
+                disabled={!canWrite || pending}
+                run={run}
+                patch={patch}
+              />
+            </section>
+            <section
+              role="tabpanel"
+              id="workspace-panel-subjects"
+              aria-labelledby="workspace-subjects"
+              hidden={tab !== "subjects"}
+            >
+              <SubjectLibrary
+                client={client}
+                projectId={projectId}
+                activeShotId={activeShotId}
+                assets={assets}
+                subjects={subjects}
+                onRefresh={refresh}
+                disabled={!canWrite || pending}
+                run={run}
+                patch={patch}
+              />
+            </section>
+            <section
+              role="tabpanel"
+              id="workspace-panel-history"
+              aria-labelledby="workspace-history"
+              hidden={tab !== "history"}
+              data-testid="contextual-agent-panel"
+            >
+              <div className="page-heading">
+                <div>
+                  <span className="eyebrow">可追溯的修改记录</span>
+                  <h2>协作与历史</h2>
                 </div>
-                <div className="vc-panel-body">
-                  <div
-                    style={{ marginBottom: 16 }}
-                    data-testid="manifest-audio-tracks"
-                  >
-                    <div className="vc-label" style={{ marginBottom: 8 }}>
-                      全局音轨（Global Audio Tracks）
-                    </div>
-                    {doc.audioTracks.length === 0 ? (
-                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                        当前未挂载全局背景音乐或旁白音轨
+                <button
+                  data-testid="btn-undo"
+                  disabled={
+                    !canWrite || pending || !undo.length || dirtyCount > 0
+                  }
+                  onClick={() => void run(undoEdit)}
+                >
+                  撤销本次会话的上次编辑
+                </button>
+              </div>
+              <p data-testid="agent-context-summary">
+                项目 {projectId} · 编排 {compositionId}@r{head} · 当前镜头{" "}
+                {activeShotId ?? "无"}
+              </p>
+              <div className="revision-list">
+                {history
+                  .slice()
+                  .reverse()
+                  .map((revision) => (
+                    <article key={revision.revision}>
+                      <div>
+                        <strong>修订 #{revision.revision}</strong>
+                        <span>
+                          {revision.actorKind === "human" ? "人类" : "Agent"} ·{" "}
+                          {new Date(revision.createdAt).toLocaleString("zh-CN")}
+                        </span>
                       </div>
-                    ) : (
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 6,
-                        }}
-                      >
-                        {doc.audioTracks.map((track) => (
-                          <div
-                            key={track.id}
-                            className="vc-badge vc-badge-cyan"
-                            style={{
-                              justifyContent: "space-between",
-                              padding: "8px 12px",
-                              borderRadius: "var(--radius-sm)",
-                            }}
-                            data-testid={`audio-track-${track.id}`}
-                          >
-                            <span>
-                              🎵 {track.id} [{track.role}] 资产={track.asset}{" "}
-                              帧区间={track.startFrame}..
-                              {track.startFrame + track.durationFrames}
-                            </span>
+                      <p>{revision.message ?? "创建编排"}</p>
+                      <details>
+                        <summary>查看此版本的镜头与提示词</summary>
+                        {revision.document.sequence.map((id) => (
+                          <div className="revision-shot" key={id}>
+                            <strong>
+                              {id} · {revision.document.shots[id].description}
+                            </strong>
+                            <p>
+                              {revision.document.shots[id].prompts.image ||
+                                "无画面提示词"}
+                            </p>
+                            <p>
+                              {revision.document.shots[id].prompts.video ||
+                                "无运镜提示词"}
+                            </p>
                           </div>
                         ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="vc-table-wrap">
-                    <table className="vc-table">
-                      <thead>
-                        <tr>
-                          <th>序号</th>
-                          <th>镜头 ID</th>
-                          <th>分镜描述</th>
-                          <th>时长帧数</th>
-                          <th>锁定主体设定</th>
-                          <th>前序依赖</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {orderedShots.map(({ id, index, shot }) => (
-                          <tr
-                            key={id}
-                            className={id === activeShotId ? "selected" : ""}
-                            data-testid={`list-shot-${id}`}
-                            onClick={() => setSelectedShotId(id)}
-                          >
-                            <td>#{String(index).padStart(2, "0")}</td>
-                            <td>
-                              <strong>{id}</strong>
-                            </td>
-                            <td data-testid={`shot-desc-${id}`}>
-                              {shot.description}
-                            </td>
-                            <td>{shot.durationFrames ?? 0}帧</td>
-                            <td>
-                              {shot.subjects
-                                .map(
-                                  (b) => `${b.subjectId}@v${b.subjectRevision}`,
-                                )
-                                .join("、") || "—"}
-                            </td>
-                            <td>
-                              {shot.dependsOn
-                                .map(
-                                  (d) =>
-                                    `${d.shotId}（${DEP_KIND_LABELS[d.kind] ?? d.kind}）`,
-                                )
-                                .join("、") || "—"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </section>
-            )}
-
-            {viewMode === "topology" && (
-              <section className="vc-panel" aria-label="依赖拓扑图">
-                <div className="vc-panel-header">
-                  <h2 className="vc-panel-title">
-                    镜头依赖有向无环图（DAG 拓扑）
-                  </h2>
-                </div>
-                <div className="vc-panel-body">
-                  <div className="vc-topology-grid">
-                    <div>
-                      <div className="vc-label" style={{ marginBottom: 8 }}>
-                        拓扑镜头节点
-                      </div>
-                      <ul
-                        style={{ listStyle: "none", padding: 0, margin: 0 }}
-                        data-testid="topology-nodes"
-                      >
-                        {orderedShots.map(({ id, shot }) => (
-                          <li
-                            key={id}
-                            className="vc-dag-node"
-                            data-testid={`topology-shot-${id}`}
-                            onClick={() => setSelectedShotId(id)}
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                              }}
-                            >
-                              <strong>{id}</strong>
-                              <span className="vc-badge">
-                                {shot.durationFrames ?? 0}帧
-                              </span>
-                            </div>
-                            <span
-                              style={{
-                                fontSize: 12.5,
-                                color: "var(--text-secondary)",
-                              }}
-                              data-testid={`shot-desc-${id}`}
-                            >
-                              {shot.description}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div>
-                      <div className="vc-label" style={{ marginBottom: 8 }}>
-                        依赖有向边
-                      </div>
-                      <ul
-                        style={{ listStyle: "none", padding: 0, margin: 0 }}
-                        data-testid="topology-edges"
-                      >
-                        {dependencyEdges.map((edge) => (
-                          <li
-                            key={`${edge.fromShotId}->${edge.toShotId}`}
-                            className="vc-dag-edge"
-                            data-testid={`edge-${edge.fromShotId}-${edge.toShotId}`}
-                          >
-                            {edge.fromShotId} → {edge.toShotId}（
-                            {DEP_KIND_LABELS[edge.kind] ?? edge.kind}）
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            )}
-          </main>
-        </div>
-
-        {/* 右侧栏：分镜检查器与多 Agent 协作侧栏 */}
-        <div className="vc-right-dock">
-          {activeShotId && activeShot && (
-            <section className="vc-panel" data-testid="shot-inspector">
-              <div className="vc-panel-header">
-                <h2 className="vc-panel-title">分镜检查器：{activeShotId}</h2>
-                <span className="vc-badge">
-                  {activeShot.durationFrames ?? 0} 帧
-                </span>
+                      </details>
+                    </article>
+                  ))}
               </div>
-              <div className="vc-panel-body">
-                <div className="vc-field">
-                  <label className="vc-label">分镜描述</label>
-                  <input
-                    className="vc-input"
-                    aria-label="分镜描述输入"
-                    data-testid="inspector-desc-input"
-                    value={editDraftDescription}
-                    onChange={(e) => setEditDraftDescription(e.target.value)}
-                  />
+              <details className="connection-details">
+                <summary>Agent 接入信息</summary>
+                <p>
+                  通过经过授权的远程 MCP
+                  接入此项目。所有写入需要基准修订与幂等键。
+                </p>
+                <code>{window.location.origin}/mcp</code>
+              </details>
+            </section>
+            <section
+              role="tabpanel"
+              id="workspace-panel-source"
+              aria-labelledby="workspace-source"
+              hidden={tab !== "source"}
+            >
+              <div className="page-heading">
+                <div>
+                  <span className="eyebrow">可移植的作品定义</span>
+                  <h2>编排协议</h2>
                 </div>
-                <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-                  <button
-                    type="button"
-                    className="vc-btn vc-btn-primary"
-                    style={{ flex: 1 }}
-                    data-testid="inspector-save-btn"
-                    onClick={() =>
-                      void handleSaveShotDescription(
-                        activeShotId,
-                        editDraftDescription,
-                      )
+                <div className="toolbar">
+                  <select
+                    aria-label="协议格式"
+                    value={sourceFormat}
+                    onChange={(event) =>
+                      setSourceFormat(event.target.value as "json" | "yaml")
                     }
                   >
-                    保存分镜描述
+                    <option value="yaml">YAML</option>
+                    <option value="json">JSON</option>
+                  </select>
+                  <button onClick={() => void run(download)}>
+                    导出（含设定依赖）
                   </button>
                 </div>
-
-                <div className="vc-field">
-                  <label className="vc-label">持续帧数</label>
-                  <input
-                    type="number"
-                    className="vc-input"
-                    value={editDraftDuration}
-                    onChange={(e) =>
-                      setEditDraftDuration(Number(e.target.value))
-                    }
-                  />
-                </div>
-
-                <div className="vc-field">
-                  <label className="vc-label">画面提示词</label>
-                  <input
-                    className="vc-input"
-                    placeholder="描述首帧或参考画面构图..."
-                    value={editDraftImagePrompt}
-                    onChange={(e) => setEditDraftImagePrompt(e.target.value)}
-                  />
-                </div>
-
-                <div className="vc-field">
-                  <label className="vc-label">运镜提示词</label>
-                  <input
-                    className="vc-input"
-                    placeholder="描述镜头运动与人物动作..."
-                    value={editDraftVideoPrompt}
-                    onChange={(e) => setEditDraftVideoPrompt(e.target.value)}
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  className="vc-btn"
-                  style={{ width: "100%", marginBottom: 16 }}
-                  onClick={() => void handleSaveShotExtended(activeShotId)}
-                >
-                  保存时长与生成提示词
-                </button>
-
-                <div className="vc-label" style={{ marginBottom: 8 }}>
-                  已解析锁定设定
-                </div>
-                <div data-testid="inspector-resolved-subjects">
-                  {Object.values(resolvedSubjects).map((rs) => (
-                    <div
-                      key={`${rs.subjectId}@${rs.subjectRevision}#${rs.resolvedVariant}`}
-                      className="vc-subject-card"
-                      data-testid={`resolved-subj-${rs.subjectId}`}
-                    >
-                      <div style={{ fontWeight: 600, fontSize: 12.5 }}>
-                        {rs.snapshot.name} 第 {rs.subjectRevision} 版 [
-                        {rs.resolvedVariant}]（{rs.referencePack.length} 张参考图）
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11.5,
-                          color: "var(--text-secondary)",
-                        }}
-                      >
-                        参考资产：
-                        {rs.referencePack.map((r) => r.asset).join("、") ||
-                          "无"}
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </div>
+              <pre className="source-code">
+                {sourceFormat === "yaml"
+                  ? serializeCompositionYaml(doc)
+                  : JSON.stringify(doc, null, 2)}
+              </pre>
             </section>
-          )}
-
-          {agentPanelOpen && (
-            <aside className="vc-panel" data-testid="contextual-agent-panel">
-              <div className="vc-panel-header">
-                <h2 className="vc-panel-title">多 Agent 协作侧栏</h2>
-                <span className="vc-badge vc-badge-approved">MCP 已就绪</span>
-              </div>
-              <div className="vc-panel-body">
-                <p
-                  style={{
-                    margin: "0 0 12px",
-                    padding: "8px 10px",
-                    background: "var(--bg-input)",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-subtle)",
-                    fontFamily: "monospace",
-                    fontSize: 11.5,
-                  }}
-                  data-testid="agent-context-summary"
-                >
-                  项目: {projectId} | 编排: {compositionId}@r{headRevision} |
-                  当前镜头: {activeShotId ?? "无"}
-                </p>
-
-                <div className="vc-label" style={{ marginBottom: 6 }}>
-                  远程 MCP 接入端点（Streamable HTTP）
-                </div>
-                <div
-                  className="vc-code-box"
-                  style={{ marginBottom: 14, padding: "7px 10px" }}
-                >
-                  POST /mcp（24 个领域工具 · 乐观锁并发校验）
-                </div>
-
-                {revisionHistory.length > 0 && (
-                  <>
-                    <div className="vc-label" style={{ marginBottom: 6 }}>
-                      不可变修订历史
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 6,
-                      }}
-                    >
-                      {revisionHistory
-                        .slice()
-                        .reverse()
-                        .slice(0, 6)
-                        .map((rev) => (
-                          <div
-                            key={rev.revision}
-                            style={{
-                              padding: "8px 10px",
-                              background: "var(--bg-card)",
-                              border: "1px solid var(--border-subtle)",
-                              borderRadius: "var(--radius-sm)",
-                              fontSize: 12,
-                            }}
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                              }}
-                            >
-                              <strong>修订 #{rev.revision}</strong>
-                              <span className="vc-badge">
-                                {rev.actorKind === "human" ? "人类" : "Agent"}:{" "}
-                                {rev.actorId}
-                              </span>
-                            </div>
-                            {rev.message && (
-                              <div
-                                style={{
-                                  color: "var(--text-secondary)",
-                                  marginTop: 4,
-                                }}
-                              >
-                                {rev.message}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            </aside>
-          )}
-        </div>
+          </div>
+          <footer className="workspace-status" aria-live="polite">
+            <span>
+              {notice ||
+                (dirtyCount
+                  ? `${dirtyCount} 个镜头有未保存草稿`
+                  : "所有修改已保存")}
+            </span>
+            <span>
+              {doc.format.width} × {doc.format.height} · {fps} fps
+            </span>
+          </footer>
+        </main>
       </div>
     </div>
   );

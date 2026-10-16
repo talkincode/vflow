@@ -3,7 +3,7 @@
 ## Decisions
 - TypeScript end-to-end. npm workspaces monorepo, strict TypeScript, ESM, Vitest and Zod/JSON Schema for protocol boundaries.
 - Cloudflare Workers (Hono HTTP API + remote MCP via Streamable HTTP, with Workers Static Assets for the lightweight Web UI when feasible); Cloudflare D1 for authoritative metadata and revision transactions; R2 for immutable media objects, private by default.
-- React + Vite + TypeScript SPA for lightweight grid/list/dependency graph and collapsible contextual Agent panel. Graph is a visualization, never a model execution graph.
+- React + Vite + TypeScript SPA with persistent shot navigation and central tabs for shots, assets, subjects, collaboration/history and protocol. Preview and editing share a work page, with a focus mode. Grid/list/dependency views share the composition model. Graph is a visualization, never a model execution graph.
 - Shared `packages/protocol` defines JSON Schema, canonical JSON, parsing, compatibility policy and semantic invariants. YAML is an interchange form only.
 - MCP and HTTP/GUI call the same domain service. Do not build separate write paths.
 - No media generation, transcoding, FFmpeg runtime, publication or execution orchestrator in this service.
@@ -34,6 +34,10 @@ Proposal -> wraps a pending `Change` (`baseRevision` + `typedPatch`); applying/a
 ## Asset Transfer
 Worker issues short-lived scoped upload instructions (`upload_sessions` recorded in D1 with expiration, expected size, MIME, and SHA-256 digest); client/Agent uploads to R2. Finalize verifies SHA-256 digest, content type and byte size before registering the `Asset` record in D1; incomplete or failed uploads never expose a visible asset, and expired `upload_sessions` allow orphaned R2 objects to be cleaned up. Store storage object keys separately from the public protocol model. Never embed signed URLs, credentials or provider secrets in compositions.
 
+`GET`/`HEAD /v1/projects/:projectId/assets/:assetId/content` resolves a stable asset ID after domain-level project read authorization. R2 bodies stream to the response, with single byte-range requests (`206` / `416`) for native audio/video playback and seeking. Responses are private and non-cacheable; unsupported or active document formats download as attachments. No public R2 URL is introduced into composition definitions.
+
+`GET /v1/projects/:projectId/access` returns the caller's project role through the same domain permission check. The UI disables mutations for readers; the API remains authoritative when controls are bypassed.
+
 ## Public APIs
 REST `/v1/projects`, `/compositions`, `/revisions`, `/changes`, `/assets`, `/subjects`, `/proposals`.
 Remote MCP over authenticated Streamable HTTP: `project_list`/`get`, `composition_get`/`patch`/`history`/`export`/`import`, `asset_search`/`upload`/`link`, `subject_list`/`get`/`create`/`patch`, `subject_reference_attach`, `subject_approve_revision`, `shot_subject_bind`, `review_submit`/`approve`.
@@ -46,7 +50,13 @@ Project export must contain all referenced subject-revision manifests and stable
 
 Detailed draft: [subject/reference model](subjects.md).
 
-## Source layout (planned; not implemented)
+## Workbench edit state
+
+Unsaved descriptions, durations and prompts live per shot in the current page, retaining the original revision and operation ID. Switching shots, tabs or layout preserves them. Leaving the page warns about unsaved work; drafts are not durable storage. A save submits only edited fields, including explicit empty strings. Failed retries preserve their payload and idempotency key. Conflicting edits retain the draft and require deliberate comparison and reconciliation with the latest revision.
+
+Session undo applies an inverse patch only to fields edited by that session, checks that those fields have not changed since the saved operation, and preserves concurrent unrelated changes. It does not restore entire historical snapshots or toggle between two revisions. Batch duration changes use a single typed patch and sequence ordering uses stable shot IDs with relative anchors. These adapters use existing domain contracts; this UI release changes no portable schema or database migration.
+
+## Source layout
 ```
 apps/web/                # React Vite workspace
 apps/api/                # Hono Cloudflare Worker and MCP endpoint
@@ -55,6 +65,8 @@ packages/domain/         # pure domain logic and merge rules
 packages/client/         # typed HTTP client
 docs/                    # roadmap, architecture, protocol decisions
 tests/e2e/               # black-box acceptance scenarios
+tests/browser/           # real Chromium interaction, media and layout acceptance
+scripts/ui-test-server.ts # isolated, loopback-only acceptance fixture; not deployed
 ```
 
 ## Quality

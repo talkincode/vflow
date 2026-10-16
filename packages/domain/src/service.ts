@@ -114,6 +114,20 @@ export class VideoComposeDomainService {
     return { availableAssets, availableSubjects };
   }
 
+  async getProjectAccess(
+    actor: ActorIdentity | null | undefined,
+    projectId: string,
+  ): Promise<{ role: ProjectRole }> {
+    const state = await this.store.readState();
+    const access = this.assertProjectPermission(
+      state,
+      projectId,
+      actor,
+      "reader",
+    );
+    return { role: access.project.members[access.actor.actorId] };
+  }
+
   async createProject(
     actor: ActorIdentity | null | undefined,
     input: {
@@ -446,6 +460,58 @@ export class VideoComposeDomainService {
       );
     }
     return asset;
+  }
+
+  async getAssetContent(
+    actor: ActorIdentity | null | undefined,
+    projectId: string,
+    assetId: string,
+    options?: {
+      range?: { start: number; end?: number } | { suffix: number };
+      head?: boolean;
+    },
+  ): Promise<{
+    asset: AssetRecord;
+    body: ReadableStream<Uint8Array> | null;
+    range?: { offset: number; length: number };
+  }> {
+    const asset = await this.getAsset(actor, projectId, assetId);
+    const requested = options?.range;
+    let range: { offset: number; length: number } | undefined;
+    if (requested) {
+      const start =
+        "suffix" in requested
+          ? Math.max(0, asset.sizeBytes - requested.suffix)
+          : requested.start;
+      const end =
+        "suffix" in requested
+          ? asset.sizeBytes - 1
+          : Math.min(requested.end ?? asset.sizeBytes - 1, asset.sizeBytes - 1);
+      if (
+        !Number.isSafeInteger(start) ||
+        !Number.isSafeInteger(end) ||
+        start < 0 ||
+        start >= asset.sizeBytes ||
+        end < start ||
+        ("suffix" in requested &&
+          (!Number.isSafeInteger(requested.suffix) || requested.suffix <= 0))
+      ) {
+        throw new DomainError(
+          "RANGE_NOT_SATISFIABLE",
+          "Requested byte range is not available.",
+          { sizeBytes: asset.sizeBytes },
+        );
+      }
+      range = { offset: start, length: end - start + 1 };
+    }
+    if (options?.head && !(await this.store.bucket.has(asset.storageKey)))
+      throw new DomainError("NOT_FOUND", "The media file is unavailable.");
+    const body = options?.head
+      ? null
+      : await this.store.bucket.read(asset.storageKey, range);
+    if (!options?.head && !body)
+      throw new DomainError("NOT_FOUND", "The media file is unavailable.");
+    return { asset, body, ...(range ? { range } : {}) };
   }
 
   async deleteAsset(

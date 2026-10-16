@@ -48,6 +48,10 @@ export function createEmptyStateSnapshot(): DomainStateSnapshot {
 export interface ObjectBucketAdapter {
   put(key: string, data: Uint8Array, mimeType: string): Promise<void>;
   get(key: string): Promise<{ data: Uint8Array; mimeType: string } | null>;
+  read(
+    key: string,
+    range?: { offset: number; length: number },
+  ): Promise<ReadableStream<Uint8Array> | null>;
   delete(key: string): Promise<void>;
   has(key: string): Promise<boolean>;
 }
@@ -84,6 +88,23 @@ export class InMemoryObjectBucket implements ObjectBucketAdapter {
 
   async delete(key: string): Promise<void> {
     this.objects.delete(key);
+  }
+
+  async read(
+    key: string,
+    range?: { offset: number; length: number },
+  ): Promise<ReadableStream<Uint8Array> | null> {
+    const object = this.objects.get(key);
+    if (!object) return null;
+    const bytes = range
+      ? object.data.slice(range.offset, range.offset + range.length)
+      : new Uint8Array(object.data);
+    return new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    });
   }
 
   async has(key: string): Promise<boolean> {

@@ -192,6 +192,7 @@ export interface ConflictDetail {
 }
 
 export type DomainErrorCode =
+  | "RANGE_NOT_SATISFIABLE"
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "NOT_FOUND"

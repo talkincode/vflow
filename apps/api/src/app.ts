@@ -10,6 +10,8 @@ import { handleMcpJsonRpc, type JsonRpcRequest } from "./mcp.ts";
 
 function statusForDomainError(code: DomainErrorCode): ContentfulStatusCode {
   switch (code) {
+    case "RANGE_NOT_SATISFIABLE":
+      return 416;
     case "UNAUTHORIZED":
       return 401;
     case "FORBIDDEN":
@@ -98,6 +100,13 @@ export function createApiApp(
     return c.json({ project });
   });
 
+  app.get("/v1/projects/:projectId/access", async (c) => {
+    const actor = extractActorFromHeaders(c.req.raw.headers, authConfig);
+    return c.json(
+      await domain.getProjectAccess(actor, c.req.param("projectId")),
+    );
+  });
+
   app.put("/v1/projects/:projectId/members/:targetActorId", async (c) => {
     const actor = extractActorFromHeaders(c.req.raw.headers, authConfig);
     const body = await c.req.json();
@@ -120,6 +129,83 @@ export function createApiApp(
     );
     return c.json({ assets });
   });
+
+  app.on(
+    ["GET", "HEAD"],
+    "/v1/projects/:projectId/assets/:assetId/content",
+    async (c) => {
+      const actor = extractActorFromHeaders(c.req.raw.headers, authConfig);
+      const projectId = c.req.param("projectId");
+      const assetId = c.req.param("assetId");
+      const rawRange = c.req.header("Range");
+      const match = rawRange?.match(/^bytes=(\d*)-(\d*)$/);
+      if (rawRange && (!match || (!match[1] && !match[2]))) {
+        const asset = await domain.getAsset(actor, projectId, assetId);
+        return new Response(null, {
+          status: 416,
+          headers: {
+            "Content-Range": `bytes */${asset.sizeBytes}`,
+            "Cache-Control": "private, no-store",
+          },
+        });
+      }
+      const range = match
+        ? match[1]
+          ? {
+              start: Number(match[1]),
+              ...(match[2] ? { end: Number(match[2]) } : {}),
+            }
+          : { suffix: Number(match[2]) }
+        : undefined;
+      try {
+        const content = await domain.getAssetContent(
+          actor,
+          projectId,
+          assetId,
+          { range, head: c.req.method === "HEAD" },
+        );
+        const inline =
+          /^(image\/(png|jpeg|gif|webp|avif)|video\/(mp4|webm|ogg)|audio\/(mpeg|mp4|ogg|wav|x-wav|flac|aac))$/i.test(
+            content.asset.mimeType,
+          );
+        const headers = new Headers({
+          "Content-Type": content.asset.mimeType,
+          "Content-Length": String(
+            content.range?.length ?? content.asset.sizeBytes,
+          ),
+          "Accept-Ranges": "bytes",
+          "Cache-Control": "private, no-store",
+          "X-Content-Type-Options": "nosniff",
+          "Content-Disposition": inline ? "inline" : "attachment",
+          "Content-Security-Policy": "sandbox; default-src 'none'",
+          ETag: `"${content.asset.sha256}"`,
+        });
+        if (content.range)
+          headers.set(
+            "Content-Range",
+            `bytes ${content.range.offset}-${content.range.offset + content.range.length - 1}/${content.asset.sizeBytes}`,
+          );
+        return new Response(content.body, {
+          status: content.range ? 206 : 200,
+          headers,
+        });
+      } catch (error) {
+        if (
+          error instanceof DomainError &&
+          error.code === "RANGE_NOT_SATISFIABLE"
+        ) {
+          return new Response(null, {
+            status: 416,
+            headers: {
+              "Content-Range": `bytes */${error.details?.sizeBytes}`,
+              "Cache-Control": "private, no-store",
+            },
+          });
+        }
+        throw error;
+      }
+    },
+  );
 
   app.post("/v1/projects/:projectId/assets/prepare", async (c) => {
     const actor = extractActorFromHeaders(c.req.raw.headers, authConfig);

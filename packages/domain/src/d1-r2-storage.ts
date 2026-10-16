@@ -31,6 +31,7 @@ export interface CloudflareD1DatabaseLike {
 
 export interface CloudflareR2ObjectBodyLike {
   arrayBuffer(): Promise<ArrayBuffer>;
+  body: ReadableStream<Uint8Array>;
   httpMetadata?: { contentType?: string };
 }
 
@@ -40,7 +41,10 @@ export interface CloudflareR2BucketLike {
     value: Uint8Array | ArrayBuffer,
     options?: { httpMetadata?: { contentType?: string } },
   ): Promise<unknown>;
-  get(key: string): Promise<CloudflareR2ObjectBodyLike | null>;
+  get(
+    key: string,
+    options?: { range?: { offset: number; length: number } },
+  ): Promise<CloudflareR2ObjectBodyLike | null>;
   delete(key: string): Promise<void>;
   head(key: string): Promise<unknown | null>;
 }
@@ -70,6 +74,14 @@ export class R2ObjectBucketAdapter implements ObjectBucketAdapter {
 
   async delete(key: string): Promise<void> {
     await this.r2.delete(key);
+  }
+
+  async read(
+    key: string,
+    range?: { offset: number; length: number },
+  ): Promise<ReadableStream<Uint8Array> | null> {
+    const object = await this.r2.get(key, range ? { range } : undefined);
+    return object?.body ?? null;
   }
 
   async has(key: string): Promise<boolean> {

@@ -14,6 +14,7 @@
 - Non-interactive Agent/MCP clients use policy-approved authentication via **Cloudflare Access Service Tokens** (`video-compose-service-tokens`, reusable `non_identity` policy `f27f90e0-3f77-4452-8b51-3b37009fd8ae`). Service tokens are sensitive and are never stored in Git, composition JSON/YAML or project memory.
 - Access authenticates entry, and **the Worker/domain layer still checks project membership and permission (`reader` for read/export, `writer` for mutations) on every call**. A globally authenticated Agent may not gain access to every project's assets by default.
 - Upload/download tickets for R2 must be short lived, object-scoped and permission checked. Do not expose private R2 objects directly through an unauthenticated static route.
+- Browser previews use the same-origin, project-authorized `GET`/`HEAD /v1/projects/:projectId/assets/:assetId/content` endpoint, streaming R2 with byte-range support. They do not require public objects or permanent signed URLs.
 - Access protection, origin bypass paths and alternative `workers.dev` routes have been reviewed (`workers_dev: false`).
 
 ## GitHub -> Cloudflare Workers
@@ -43,6 +44,14 @@
   - Authenticated REST + D1 + R2 round-trip (`demo` project, `asset-lina-turnaround-v1` R2 upload + SHA-256 verification, `char-lina` Subject rev 1, `episode-001` Composition rev 1) -> `201 Created`
   - Authenticated MCP (`POST https://video-compose.talkincode.net/mcp` `tools/list` and `composition_get`) -> `200 OK` (24 MCP tools registered, `char-lina@1#raincoat` resolved)
 - **Not yet configured**: Native Cloudflare Workers Builds GitHub auto-trigger (current deployment executed via authenticated Wrangler CLI).
+
+## Workbench UI release procedure (2026-10-16)
+
+- Rechecked the Worker bindings, compatibility date and current deployment through the Cloudflare API. Native Workers Builds triggers are empty. `.github/workflows/ci.yml` runs acceptance checks only and holds no deployment credentials; Wrangler remains the single production deployer.
+- Run `npm run typecheck`, `npm run lint`, `npm test` and `npm run test:browser`, then push and verify the CI run for that exact Git commit. The Chromium checks seed isolated synthetic media and 100 shots rather than writing production data.
+- Before upload, run `npx wrangler whoami` and `npx wrangler deploy --config apps/api/wrangler.jsonc --dry-run`. Build output and bindings must match the intended Worker. Publish with the Git commit in `--message`; preserve dashboard variables with `--keep-vars`.
+- Previous production Worker version recorded before this release: `0f5954cf-dc58-4974-959b-d770cdc82e5e` (deployment `3b144f27-ad08-43d3-9e66-26560199c3c3`, 100%). If this release fails, use `npx wrangler rollback 0f5954cf-dc58-4974-959b-d770cdc82e5e --config apps/api/wrangler.jsonc` after checking that it is still the intended prior version, and verify the protected UI again. No D1 migration or R2 object mutation is part of this release; Worker rollback still does not roll back stored composition edits.
+- After promotion, independently read back the Cloudflare deployment, verify anonymous rejection for UI/API/MCP, and inspect the logged-in workbench at the production hostname. Record the actual version and results in the release evidence; a dry run is not production verification.
 
 ## Official references
 - [Cloudflare Workers Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)

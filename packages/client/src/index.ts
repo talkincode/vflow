@@ -154,6 +154,12 @@ export class VideoComposeClient {
     return data.project;
   }
 
+  async getProjectAccess(projectId: string): Promise<{ role: ProjectRole }> {
+    return this.requestJson(
+      `/v1/projects/${encodeURIComponent(projectId)}/access`,
+    );
+  }
+
   async uploadAsset(input: {
     projectId: string;
     assetId: string;
@@ -205,6 +211,10 @@ export class VideoComposeClient {
       `/v1/projects/${encodeURIComponent(projectId)}/assets`,
     );
     return data.assets;
+  }
+
+  assetContentUrl(projectId: string, assetId: string): string {
+    return `${this.baseUrl}/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`;
   }
 
   async deleteAsset(

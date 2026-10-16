@@ -9,27 +9,45 @@ Video Compose 面向人与多个 Agent 共创视频作品。项目记录可移�
 
 **只做定义、协作与资产管理，不做模型生成、渲染执行或视频发布。** 不是 ComfyUI，也不是视频剪辑器。
 
-## 核心能力（目标，尚未实现）
+## 核心能力
 - Project 下多个 Composition，共享可检索的 Asset，并采用简洁的项目级 `reader` / `writer` 读写权限隔离。
 - **角色/道具设定库**：项目级主体（Subject）有独立定义、稳定 ID、带状态（`status: candidate | approved`）的修订版本、外观/状态变体（含 `defaultVariant`）和多视角参考图集；`candidate` 状态便于修改迭代，批准为 `approved` 后冻结；分镜绑定确定版本，禁止参考设定悄然漂移。详见 [主体与参考图规范草案](docs/subjects.md)。
 - v1 JSON/YAML 声明式编排协议和可机读 Schema。
 - 稳定 Shot ID、播放序列与分镜依赖拓扑（`dependsOn` DAG）、全局音轨（`audioTracks` 如全局 BGM/旁白）、分镜多参考图、可选参考视频、Prompt、音视频候选集（`candidates`）与选定输出（`selected`）、整数帧时长与扩展元数据。
 - 不可变 R2 媒体（两阶段上传与 SHA-256 校验）与 D1 资产索引、修订历史、基于稳定 ID 的结构化 Patch、冲突检测和审阅提案（Proposal）。
-- 统一 REST/MCP 接口；轻量 React 网格、清单、拓扑及 Agent 侧栏。
+- 统一 REST/MCP 接口；React 工作台提供分镜、素材、角色与道具、协作与历史、协议标签页，保留网格、清单和依赖视图。
+- 同源受权图片/视频/音频预览；按镜头保留当前页面草稿，明确保存范围与冲突处理；镜头搜索、前后跳转、排序与原子批量时长修改。
 
-## 技术架构（规划）
+## 技术架构
 TypeScript（strict/ESM）贯穿协议、服务与 Web；npm workspaces。
 - API: Cloudflare Workers + Hono + remote MCP.
 - Storage: Cloudflare D1（authoritative revisions / ACL / metadata）+ R2（immutable media）。
-- Web: React + Vite，三种同源视图。
+- Web: React + Vite，预览/编辑并排，可收起导航或进入专注编辑。
 - Optional: Durable Objects 用于必要时的在线协作通知。
-- **Deploy target**: Cloudflare Workers，规划域名 `video-compose.talkincode.net`（`talkincode.net` Cloudflare 子域名），UI/API/MCP 统一受 Cloudflare Access Zero Trust SSO 保护；Agent 经受控非交互身份访问，Worker 做项目级授权。
+- **Deploy target**: Cloudflare Workers，已验证域名 `video-compose.talkincode.net`（`talkincode.net` Cloudflare 子域名），UI/API/MCP 统一受 Cloudflare Access Zero Trust SSO 保护；Agent 经受控非交互身份访问，Worker 做项目级授权。
 - **GitHub-to-Workers**: 首选 Cloudflare Workers Builds 与 GitHub `main` 集成部署；GitHub Actions + Wrangler 仅作为替代部署路径，两者不并行部署生产。详见 [deployment](docs/deployment.md)。
 详见 [architecture](docs/architecture.md)。
 
 ## 项目状态
-- **本地核心实现与 E2E 验收（M1–M3 已完成）**：`packages/protocol`、`packages/domain`、`packages/client`、`apps/api`、`apps/web` 及 8 套 E2E 验收测试（`tests/e2e/`）已实现并通过本地 `typecheck`、`test`、`lint` 与 `build` 验证。
-- **线上部署状态（M4 待核验）**：规划子域名 `video-compose.talkincode.net`、Cloudflare Access、D1/R2 生产绑定与 GitHub 部署集成仍属于待配置与待核验的目标状态。
+- **本地核心实现与验收**：协议、领域、HTTP/MCP、D1/R2 持久化、Web 工作台已有 10 套 E2E/集成测试；另有真实 Chromium 验收覆盖媒体解码、100 镜头操作、两种角色及 360–1920 像素布局。执行方式见下方。
+- **线上环境**：Cloudflare Workers 自定义域名、Access、D1/R2 绑定已核验。当前通过 Wrangler 手动发布；GitHub Actions 只做质量检查，Workers Builds 自动触发尚未配置。最近发布证据与回滚说明见 [deployment](docs/deployment.md)。
+
+## 本地验证与发布
+
+使用 Node.js 26 和仓库锁定的 npm 依赖：
+
+```sh
+npm ci
+npm run typecheck
+npm run lint
+npm test
+PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --with-deps chromium
+npm run test:browser
+```
+
+浏览器验收会启动仅监听回环地址的本地测试服务，使用合成媒体和 100 个分镜，不连接生产数据。`scripts/ui-test-server.ts` 不属于生产 Worker。
+
+通过目标提交的 CI 后，已登录正确 Cloudflare 账户的维护者运行 `npm run deploy`。部署前后核对 Worker 版本、D1/R2 绑定、Access 保护和登录后的真实界面，不能把本地构建成功当成线上发布成功。
 
 ## Quality & contributions
 请先阅读 [AGENTS.md](AGENTS.md) 及 [roadmap acceptance matrix](docs/roadmap.md#验收矩阵业务能力覆盖矩阵)。新增一级能力必须补充 Happy Path E2E；高风险、权限及状态修改必须验证失败和恢复路径。禁止为功能开发而扩大非目标范围。
