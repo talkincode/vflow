@@ -88,14 +88,23 @@ export class VideoComposeClient {
       };
     }
     const res = await this.fetchFn(`${this.baseUrl}${path}`, {
+      cache: "no-store",
       ...init,
       headers: {
         "content-type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
         ...this.defaultHeaders,
         ...(init.headers as Record<string, string> | undefined),
       },
     });
-    const payload = (await res.json()) as Record<string, unknown>;
+    const payload = (await res
+      .json()
+      .catch(() => ({
+        error: {
+          code: res.status === 401 ? "UNAUTHORIZED" : "INTERNAL_ERROR",
+          message: `HTTP ${res.status}`,
+        },
+      }))) as Record<string, unknown>;
     if (!res.ok) {
       const errObj = (payload.error ?? {}) as Record<string, unknown>;
       const code = (errObj.code ?? "INTERNAL_ERROR") as DomainErrorCode;
@@ -154,6 +163,54 @@ export class VideoComposeClient {
       "INTERNAL_ERROR",
       "MCP result contains no readable content.",
     );
+  }
+
+  async getSession() {
+    return this.requestJson<{
+      actor: import("@video-compose/protocol").ActorIdentity;
+      logoutUrl: string;
+    }>("/v1/session");
+  }
+  async listTrash() {
+    return this.requestJson<{
+      items: import("@video-compose/domain").TrashItem[];
+    }>("/v1/trash");
+  }
+  async changeResource(input: {
+    projectId: string;
+    kind: "project" | "composition";
+    id: string;
+    action: "trash" | "restore";
+    baseRevision: number;
+    operationId: string;
+    expectedHeadRevision?: number;
+  }) {
+    const base = `/v1/projects/${encodeURIComponent(input.projectId)}`;
+    const path =
+      input.kind === "project"
+        ? base + (input.action === "restore" ? "/restore" : "")
+        : `${base}/compositions/${encodeURIComponent(input.id)}` +
+          (input.action === "restore" ? "/restore-from-trash" : "");
+    return this.requestJson<{
+      revision: number;
+      event: import("@video-compose/domain").LifecycleEvent;
+    }>(path, {
+      method: input.action === "trash" ? "DELETE" : "POST",
+      body: JSON.stringify(input),
+    });
+  }
+  async setProjectMember(input: {
+    projectId: string;
+    targetActorId: string;
+    role: ProjectRole | null;
+    baseRevision: number;
+    operationId: string;
+  }) {
+    const result = await this.requestJson<{ project: ProjectRecord }>(
+      `/v1/projects/${encodeURIComponent(input.projectId)}/members/${encodeURIComponent(input.targetActorId)}`,
+      { method: "PUT", body: JSON.stringify(input) },
+    );
+    return result.project;
   }
 
   async getAuthoringWorkflow(projectId: string) {
@@ -261,6 +318,7 @@ export class VideoComposeClient {
     members?: Record<string, ProjectRole>;
     operationId?: string;
     authoringMode?: "strict" | "legacy";
+    sharingMode?: "private" | "members";
   }): Promise<ProjectRecord> {
     const data = await this.requestJson<{ project: ProjectRecord }>(
       "/v1/projects",

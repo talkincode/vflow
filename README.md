@@ -62,3 +62,5 @@ npm run test:browser
 
 ## License
 MIT
+
+账号默认私有、明确授权共享、退出登录及项目/编排回收站的权限、接口和迁移说明见 [用户与回收站](docs/accounts-and-trash.md)。

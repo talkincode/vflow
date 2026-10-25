@@ -43,7 +43,7 @@
 
 ## MCP 指导与领域门禁
 
-实际支持的 initialize 版本为 `2025-03-26`、`2025-06-18`、`2025-11-25`。服务声明 instructions、prompts、resources 和 tools。未知协议版本反提议 `2025-11-25`，不盲目回显；没有宣称支持新的 `server/discover` 生命周期。
+兼容两代生命周期：旧客户端使用 `initialize`（`2025-03-26`、`2025-06-18`、`2025-11-25`），未知 initialize 版本仍反提议 `2025-11-25`。新客户端使用 `2026-07-28` 的逐请求 metadata 和 `server/discover`，返回 `supportedVersions`、能力、serverInfo metadata 以及完整结果标记。工具、提示模板与资源共用同一份定义和领域授权；不依赖连接会话。HTTP 检查新协议的版本/方法/名称头与请求体一致，错误返回机读 400/404；旧通知返回空 202，不支持的 GET SSE 返回 405。详见 [MCP 发现兼容性](mcp-discovery.md)。
 
 - `prompts/list/get`：七个制作/审阅/输入模板。`projectId/brief` 是必填字符串，`language` 可选 zh/en。未知模板、非法或缺失参数返回 `-32602`；项目访问仍检查 ACL。
 - `resources/list/read`：中英文公共规则与完整资料/输入 Schema。

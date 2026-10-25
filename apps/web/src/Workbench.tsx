@@ -12,6 +12,7 @@ import {
   serializeCompositionYaml,
 } from "@video-compose/protocol";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { AccountMenu } from "./AccountMenu.tsx";
 import { MediaPreview } from "./MediaPreview.tsx";
 import {
   AssetLibrary,
@@ -20,7 +21,11 @@ import {
   shotPreview,
 } from "./WorkspacePanels.tsx";
 
-const AuthoringPanel = React.lazy(() => import("./AuthoringPanel.tsx").then(module => ({ default: module.AuthoringPanel })));
+const AuthoringPanel = React.lazy(() =>
+  import("./AuthoringPanel.tsx").then((module) => ({
+    default: module.AuthoringPanel,
+  })),
+);
 
 export type WorkbenchViewMode = "grid" | "list" | "topology";
 export interface WorkbenchProps {
@@ -34,7 +39,8 @@ export interface WorkbenchProps {
 type CompositionData = Awaited<
   ReturnType<VideoComposeClient["getComposition"]>
 >;
-type WorkspaceTab = "shots" | "assets" | "subjects" | "authoring" | "history" | "source";
+type WorkspaceTab =
+  "shots" | "assets" | "subjects" | "authoring" | "history" | "source";
 interface ShotDraft {
   description: string;
   duration: string;
@@ -131,7 +137,9 @@ export function Workbench({
   const [tab, setTab] = useState<WorkspaceTab>("shots");
   const [authoringVisited, setAuthoringVisited] = useState(false);
   const [referenceDirty, setReferenceDirty] = useState(false);
-  useEffect(() => { if (tab === "authoring") setAuthoringVisited(true); }, [tab]);
+  useEffect(() => {
+    if (tab === "authoring") setAuthoringVisited(true);
+  }, [tab]);
   const [viewMode, setViewMode] = useState(initialView);
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -189,6 +197,14 @@ export function Workbench({
         setHistory(historyResult.value.revisions);
       else setNotice("修订历史暂时无法加载，请重试刷新。");
     } catch (err) {
+      if (
+        err instanceof DomainError &&
+        ["UNAUTHORIZED", "FORBIDDEN", "RESOURCE_TRASHED"].includes(err.code)
+      ) {
+        setData(null);
+        setSubjects([]);
+        setAssets([]);
+      }
       if (err instanceof DomainError && err.code === "NOT_FOUND") {
         if (allowBootstrap) setBootstrap(true);
         else setError("未找到此编排。请返回项目，选择已有编排或新建编排。");
@@ -219,6 +235,16 @@ export function Workbench({
     try {
       await operation();
     } catch (err) {
+      if (
+        err instanceof DomainError &&
+        ["UNAUTHORIZED", "FORBIDDEN", "RESOURCE_TRASHED"].includes(err.code)
+      ) {
+        setData(null);
+        setAssets([]);
+        setSubjects([]);
+        setHistory([]);
+        setDrafts({});
+      }
       setError(messageOf(err));
       if (err instanceof DomainError && err.code === "REVISION_CONFLICT")
         await refresh();
@@ -552,6 +578,7 @@ export function Workbench({
   return (
     <div
       className={`workbench ${focus ? "focus-mode" : ""} ${!navigationOpen ? "navigation-hidden" : ""}`}
+      aria-busy={pending}
       data-testid="video-compose-workbench"
     >
       <header className="app-header">
@@ -587,6 +614,7 @@ export function Workbench({
         >
           刷新
         </button>
+        <AccountMenu client={client} />
       </header>
       {error && (
         <div role="alert" className="alert" data-testid="workbench-error">
@@ -1034,7 +1062,7 @@ export function Workbench({
                       </div>
                       {Boolean(
                         activeShot.references.images.length ||
-                          activeShot.references.videos.length,
+                        activeShot.references.videos.length,
                       ) && (
                         <div className="reference-thumbnails">
                           {[
@@ -1247,8 +1275,31 @@ export function Workbench({
                 patch={patch}
               />
             </section>
-            <section role="tabpanel" id="workspace-panel-authoring" aria-labelledby="workspace-authoring" hidden={tab !== "authoring"}>
-              {(tab === "authoring" || authoringVisited) && <React.Suspense fallback={<p role="status">正在载入参考工作台…</p>}><AuthoringPanel client={client} projectId={projectId} composition={doc} compositionRevision={data.revisionRecord.revision} assets={assets} subjects={subjects} activeShotId={activeShotId} disabled={!canWrite || pending} active={tab === "authoring"} onDirtyChange={setReferenceDirty} patch={patch} /></React.Suspense>}
+            <section
+              role="tabpanel"
+              id="workspace-panel-authoring"
+              aria-labelledby="workspace-authoring"
+              hidden={tab !== "authoring"}
+            >
+              {(tab === "authoring" || authoringVisited) && (
+                <React.Suspense
+                  fallback={<p role="status">正在载入参考工作台…</p>}
+                >
+                  <AuthoringPanel
+                    client={client}
+                    projectId={projectId}
+                    composition={doc}
+                    compositionRevision={data.revisionRecord.revision}
+                    assets={assets}
+                    subjects={subjects}
+                    activeShotId={activeShotId}
+                    disabled={!canWrite || pending}
+                    active={tab === "authoring"}
+                    onDirtyChange={setReferenceDirty}
+                    patch={patch}
+                  />
+                </React.Suspense>
+              )}
             </section>
             <section
               role="tabpanel"
@@ -1356,10 +1407,12 @@ export function Workbench({
           </div>
           <footer className="workspace-status" aria-live="polite">
             <span>
-              {referenceDirty ? "参考资料或审阅有未保存草稿" : notice ||
-                (dirtyCount
-                  ? `${dirtyCount} 个镜头有未保存草稿`
-                  : "所有修改已保存")}
+              {referenceDirty
+                ? "参考资料或审阅有未保存草稿"
+                : notice ||
+                  (dirtyCount
+                    ? `${dirtyCount} 个镜头有未保存草稿`
+                    : "所有修改已保存")}
             </span>
             <span>
               {doc.format.width} × {doc.format.height} · {fps} fps

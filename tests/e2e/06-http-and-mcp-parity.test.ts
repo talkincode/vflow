@@ -135,7 +135,7 @@ describe("E2E 06 — HTTP/MCP 接入 (HTTP REST & Remote MCP Parity)", () => {
 
     // Strict MCP clients reject array-valued structuredContent even when text is valid.
     for (const name of ["project_list", "composition_list", "asset_search", "subject_list", "subject_usage", "composition_history"]) {
-      const response = await handleMcpJsonRpc(domain, { actorId: "agent-storyboard", actorKind: "agent" }, {
+      const response = await handleMcpJsonRpc(domain, { actorId: "agent-storyboard", actorKind: "agent", userId:"alice@talkincode.net" }, {
         jsonrpc: "2.0", id: name, method: "tools/call",
         params: { name, arguments: { projectId: "mcp-proj", compositionId: "comp-parity", subjectId: "char-mcp" } },
       });

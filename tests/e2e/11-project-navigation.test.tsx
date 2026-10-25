@@ -187,20 +187,13 @@ describe("E2E 11 — 项目入口、编排导航与创建恢复", () => {
     ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
     expect(await h.writerClient.listProjects()).toHaveLength(1);
     expect(await h.writerClient.listCompositions(project.id)).toHaveLength(1);
-    await h.domain.setProjectMemberRole(
-      { actorId: "bob-reader@talkincode.net", actorKind: "human" },
-      {
-        projectId: project.id,
-        targetActorId: "alice@talkincode.net",
-        role: "reader",
-      },
-    );
-    await expect(h.writerClient.createProject(request)).rejects.toMatchObject({
-      code: "FORBIDDEN",
-    });
-    await expect(
-      h.writerClient.createComposition(composition),
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(h.domain.setProjectMemberRole({actorId:"bob-reader@talkincode.net",actorKind:"human"},{projectId:project.id,targetActorId:"alice@talkincode.net",role:"reader",baseRevision:0,operationId:"cannot-edit-owner"})).rejects.toMatchObject({code:"FORBIDDEN"});
+    const delegated={projectId:project.id,document:projectComposition(project.id,"delegated","Shared writer","Frame"),operationId:"delegated-once"};
+    await h.readerClient.getAuthoringWorkflow(project.id);
+    await h.readerClient.createComposition(delegated);
+    await h.writerClient.setProjectMember({projectId:project.id,targetActorId:"bob-reader@talkincode.net",role:null,baseRevision:0,operationId:"revoke-shared-writer"});
+    await expect(h.readerClient.createComposition(delegated)).rejects.toMatchObject({code:"FORBIDDEN"});
+    expect(await h.writerClient.createProject(request)).toEqual(project);
     // Being a reader in another project does not prevent creating one's own project.
     const own = await h.writerClient.createProject({ authoringMode: "legacy", id: "own", name: "Own" });
     expect((await h.writerClient.getProjectOverview(own.id)).role).toBe(

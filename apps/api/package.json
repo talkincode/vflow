@@ -11,8 +11,9 @@
     "build": "tsc --noEmit"
   },
   "dependencies": {
-    "@video-compose/protocol": "*",
     "@video-compose/domain": "*",
-    "hono": "^4.7.4"
+    "@video-compose/protocol": "*",
+    "hono": "^4.7.4",
+    "jose": "^6.2.13"
   }
 }

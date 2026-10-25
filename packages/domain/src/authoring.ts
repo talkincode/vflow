@@ -1,3 +1,4 @@
+import { isTrashed, assertCompositionActive } from "./lifecycle.ts";
 import {
   AUTHORING_POLICY_VERSION,
   AUTHORING_PROMPTS,
@@ -28,13 +29,14 @@ import {
   type WorkflowContext,
 } from "@video-compose/protocol";
 import {
+  resourceKey,
   computeSha256Hex,
   type DomainStateSnapshot,
   type DomainStore,
 } from "./storage.ts";
 import { DomainError, type ProjectRecord } from "./types.ts";
 
-const key = (project: string, id: string) => `${project}::${id}`;
+const key = resourceKey;
 type State = Readonly<DomainStateSnapshot>;
 type Access = (
   state: State,
@@ -806,7 +808,11 @@ export class ReferenceAuthoringService {
         status: r.status,
       }));
     const compositions = Object.values(state.compositions)
-      .filter((c) => c.projectId === projectId)
+      .filter(
+        (c) =>
+          c.projectId === projectId &&
+          !isTrashed(state, projectId, "composition", c.id),
+      )
       .flatMap((c) =>
         Object.values(c.revisions)
           .filter((r) =>
@@ -1220,6 +1226,7 @@ export class ReferenceAuthoringService {
     const request = parsed.data,
       diagnostics: AuthoringDiagnostic[] = [],
       inputs: GenerationInputPacket["inputs"] = [];
+    assertCompositionActive(state, projectId, request.compositionId);
     const comp =
       state.compositions[key(projectId, request.compositionId)]?.revisions[
         request.compositionRevision

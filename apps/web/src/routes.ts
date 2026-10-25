@@ -1,5 +1,6 @@
 export type WorkspaceRoute =
   | { kind: "projects" }
+  | { kind: "trash" }
   | { kind: "project"; projectId: string }
   | { kind: "composition"; projectId: string; compositionId: string }
   | { kind: "missing" };
@@ -15,6 +16,7 @@ export const compositionUrl = (
 
 export function readRoute(pathname: string): WorkspaceRoute {
   const path = pathname.replace(/\/+$/, "") || "/";
+  if (path === "/trash") return { kind: "trash" };
   if (path === "/") return { kind: "projects" };
   const match = /^\/projects\/([^/]+)(?:\/compositions\/([^/]+))?$/.exec(path);
   if (!match) return { kind: "missing" };

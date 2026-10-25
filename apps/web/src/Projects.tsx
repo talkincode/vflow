@@ -2,6 +2,12 @@ import type { VideoComposeClient } from "@video-compose/client";
 import { DomainError } from "@video-compose/domain";
 import { PROTOCOL_VERSION } from "@video-compose/protocol";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { AccountMenu } from "./AccountMenu.tsx";
+import {
+  DeleteDialog,
+  SharingDialog,
+  type DeleteTarget,
+} from "./ResourceControls.tsx";
 import { Workbench } from "./Workbench.tsx";
 import { compositionUrl, projectUrl } from "./routes.ts";
 
@@ -57,8 +63,10 @@ function useRemote<T>(read: () => Promise<T>) {
 
 function PageHeader({
   children,
+  client,
 }: {
   children?: React.ReactNode;
+  client?: VideoComposeClient;
 }): React.ReactElement {
   return (
     <header className="app-header project-header">
@@ -69,6 +77,7 @@ function PageHeader({
         </span>
       </a>
       <nav aria-label="项目导航">{children ?? <span>项目管理</span>}</nav>
+      <AccountMenu client={client} />
     </header>
   );
 }
@@ -144,7 +153,7 @@ export function ProjectsPage({
     );
   return (
     <div className="project-shell">
-      <PageHeader />
+      <PageHeader client={client} />
       <main className="project-content">
         <div className="project-hero">
           <div>
@@ -255,6 +264,8 @@ export function ProjectPage({
   );
   const { data, error, reload } = useRemote(read);
   const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
+  const [sharing, setSharing] = useState(false);
   const [query, setQuery] = useState("");
   if (error) return <PageError message={error} onRetry={reload} />;
   if (!data) return <LoadingPage />;
@@ -266,7 +277,7 @@ export function ProjectPage({
   const writer = data.role === "writer";
   return (
     <div className="project-shell">
-      <PageHeader>
+      <PageHeader client={client}>
         <a href="/">全部项目</a>
         <span aria-hidden="true">/</span>
         <span>{data.project.name}</span>
@@ -303,6 +314,25 @@ export function ProjectPage({
             <dd>{Object.keys(data.project.members).length}</dd>
           </div>
         </dl>
+        {data.isOwner && (
+          <div className="owner-actions">
+            <button onClick={() => setSharing(true)}>共享设置</button>
+            <button
+              className="danger"
+              onClick={() =>
+                setDeleting({
+                  projectId,
+                  kind: "project",
+                  id: projectId,
+                  title: data.project.name,
+                  baseRevision: data.project.lifecycleRevision ?? 0,
+                })
+              }
+            >
+              删除项目
+            </button>
+          </div>
+        )}
         <div className="project-list-toolbar">
           <h2>项目编排</h2>
           <div className="toolbar">
@@ -346,26 +376,44 @@ export function ProjectPage({
         ) : (
           <div className="composition-grid">
             {visible.map((composition, index) => (
-              <a
-                className="composition-card"
-                key={composition.id}
-                href={compositionUrl(projectId, composition.id)}
-                aria-label={`打开编排 ${composition.title || composition.id}`}
-                data-testid={`composition-${composition.id}`}
-              >
-                <div className="composition-card-visual">
-                  <span aria-hidden="true">▤</span>
-                  <span>{String(index + 1).padStart(2, "0")}</span>
-                  <span className="badge">
-                    修订 #{composition.headRevision}
-                  </span>
-                </div>
-                <div className="composition-card-body">
-                  <h3>{composition.title || composition.id}</h3>
-                  <code>{composition.id}</code>
-                  <span className="composition-open">进入工作台 →</span>
-                </div>
-              </a>
+              <article key={composition.id} className="composition-entry">
+                <a
+                  className="composition-card"
+                  href={compositionUrl(projectId, composition.id)}
+                  aria-label={`打开编排 ${composition.title || composition.id}`}
+                  data-testid={`composition-${composition.id}`}
+                >
+                  <div className="composition-card-visual">
+                    <span aria-hidden="true">▤</span>
+                    <span>{String(index + 1).padStart(2, "0")}</span>
+                    <span className="badge">
+                      修订 #{composition.headRevision}
+                    </span>
+                  </div>
+                  <div className="composition-card-body">
+                    <h3>{composition.title || composition.id}</h3>
+                    <code>{composition.id}</code>
+                    <span className="composition-open">进入工作台 →</span>
+                  </div>
+                </a>
+                <button
+                  className="composition-delete danger"
+                  disabled={!writer}
+                  aria-label={`删除编排 ${composition.title || composition.id}`}
+                  onClick={() =>
+                    setDeleting({
+                      projectId,
+                      kind: "composition",
+                      id: composition.id,
+                      title: composition.title || composition.id,
+                      baseRevision: composition.lifecycleRevision ?? 0,
+                      expectedHeadRevision: composition.headRevision,
+                    })
+                  }
+                >
+                  移入回收站
+                </button>
+              </article>
             ))}
           </div>
         )}
@@ -373,6 +421,28 @@ export function ProjectPage({
           素材和角色设定由此项目的编排共享，每条编排分别保留自己的分镜与修订。
         </p>
       </main>
+      {deleting && (
+        <DeleteDialog
+          key={`${deleting.kind}-${deleting.id}`}
+          client={client}
+          target={deleting}
+          onCancel={() => setDeleting(null)}
+          onComplete={() => {
+            const projectDeleted = deleting.kind === "project";
+            setDeleting(null);
+            if (projectDeleted) navigate("/trash");
+            else reload();
+          }}
+        />
+      )}
+      {sharing && (
+        <SharingDialog
+          client={client}
+          project={data.project}
+          onClose={() => setSharing(false)}
+          onChanged={reload}
+        />
+      )}
       <CreateDialog
         client={client}
         kind="composition"

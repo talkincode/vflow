@@ -16,6 +16,7 @@ import {
   OUTSIDER_HEADERS,
 } from "./helpers.ts";
 import { seedWorkbench } from "./workbench-fixture.ts";
+import { TEST_AUTH_CONFIG } from "./auth-fixture.ts";
 import { createApiApp } from "../../apps/api/src/app.ts";
 
 afterEach(cleanup);
@@ -40,16 +41,21 @@ async function setup() {
     input: () => screen.getByLabelText("画面提示词") as HTMLTextAreaElement,
     save: () => fireEvent.click(screen.getByTestId("inspector-save-btn")),
     revision: (n: number) =>
-      waitFor(() =>
+      waitFor(() => {
         expect(screen.getByTestId("composition-revision").textContent).toBe(
           `修订 #${n}`,
-        ),
-      ),
+        );
+        expect(
+          screen
+            .getByTestId("video-compose-workbench")
+            .getAttribute("aria-busy"),
+        ).toBe("false");
+      }),
   };
 }
 describe("E2E 10 — 真实媒体读取与草稿恢复", () => {
   it("serves authorized full/partial media, rejects outsiders and invalid ranges, and recovers after a missing object", async () => {
-    const { app, domain } = createApiApp();
+    const { app, domain } = createApiApp(undefined, TEST_AUTH_CONFIG);
     const { VideoComposeClient } = await import("@video-compose/client");
     const client = new VideoComposeClient({
       baseUrl: "https://video-compose.talkincode.net",
@@ -201,6 +207,7 @@ describe("E2E 10 — 真实媒体读取与草稿恢复", () => {
       (await h.current()).revisionRecord.document.shots["shot-001"].prompts
         .image,
     ).toBe("其他人的修改");
+    await h.revision(2);
     // Only this explicit reconciliation creates a new base; a second save is deliberate.
     fireEvent.click(screen.getByTestId("rebase-draft"));
     h.save();

@@ -2,20 +2,10 @@ import { createApiApp } from "@video-compose/api";
 import { VideoComposeClient } from "@video-compose/client";
 import type { VideoComposeDomainService } from "@video-compose/domain";
 
-export const HUMAN_WRITER_HEADERS = {
-  "cf-access-authenticated-user-email": "alice@talkincode.net",
-  "cf-access-jwt-assertion": "verified-jwt-alice",
-};
-
-export const HUMAN_READER_HEADERS = {
-  "cf-access-authenticated-user-email": "bob-reader@talkincode.net",
-  "cf-access-jwt-assertion": "verified-jwt-bob",
-};
-
-export const OUTSIDER_HEADERS = {
-  "cf-access-authenticated-user-email": "mallory@talkincode.net",
-  "cf-access-jwt-assertion": "verified-jwt-mallory",
-};
+import { WRITER_AUTH, READER_AUTH, OUTSIDER_AUTH, TEST_AUTH_CONFIG } from "./auth-fixture.ts";
+export const HUMAN_WRITER_HEADERS=WRITER_AUTH;
+export const HUMAN_READER_HEADERS=READER_AUTH;
+export const OUTSIDER_HEADERS=OUTSIDER_AUTH;
 
 export const AGENT_A_HEADERS = {
   "cf-access-client-id": "svc-token-client-1",
@@ -24,13 +14,13 @@ export const AGENT_A_HEADERS = {
 };
 
 export const AGENT_B_HEADERS = {
-  "cf-access-client-id": "svc-token-client-1",
+  "cf-access-client-id": "svc-token-audio",
   "cf-access-client-secret": "svc-token-secret-1",
   "x-agent-id": "agent-audio",
 };
 
 export const AGENT_READER_HEADERS = {
-  "cf-access-client-id": "svc-token-client-1",
+  "cf-access-client-id": "svc-token-observer",
   "cf-access-client-secret": "svc-token-secret-1",
   "x-agent-id": "agent-observer",
 };
@@ -45,14 +35,7 @@ export function createTestHarness(): {
   agentBClient: VideoComposeClient;
   agentReaderClient: VideoComposeClient;
 } {
-  const { app, domain } = createApiApp(undefined, {
-    allowedServiceTokens: {
-      "svc-token-client-1": {
-        secret: "svc-token-secret-1",
-        defaultActorId: "agent-default",
-      },
-    },
-  });
+  const { app, domain } = createApiApp(undefined, TEST_AUTH_CONFIG);
 
   const fetchFn = async (
     input: RequestInfo | URL,

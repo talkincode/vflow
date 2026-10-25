@@ -1,4 +1,9 @@
-import { AUTHORING_TOOLS, AUTHORING_SERVER_INSTRUCTIONS, WORKFLOW_CONTEXT_SCHEMA, authoringRpc } from "./authoring-mcp.ts";
+import {
+  AUTHORING_TOOLS,
+  AUTHORING_SERVER_INSTRUCTIONS,
+  WORKFLOW_CONTEXT_SCHEMA,
+  authoringRpc,
+} from "./authoring-mcp.ts";
 import type { WorkflowContext } from "@video-compose/protocol";
 import {
   DomainError,
@@ -44,6 +49,69 @@ export interface McpToolDefinition {
 }
 
 export const MCP_TOOLS_MANIFEST: McpToolDefinition[] = [
+  {
+    name: "trash_list",
+    description:
+      "List only recycle-bin items owned by or explicitly shared with this authenticated account.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "resource_trash",
+    description:
+      "Move an owned project or writable composition into the recycle bin. Preserve history/media. Requires exact lifecycle and composition revisions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        kind: { enum: ["project", "composition"] },
+        id: { type: "string" },
+        baseRevision: { type: "integer", minimum: 0 },
+        operationId: { type: "string" },
+        expectedHeadRevision: { type: "integer", minimum: 1 },
+      },
+      required: ["projectId", "kind", "id", "baseRevision", "operationId"],
+    },
+  },
+  {
+    name: "resource_restore",
+    description:
+      "Restore a recycle-bin item with exact lifecycle revision; restore the parent project first. Does not restore separately trashed compositions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        kind: { enum: ["project", "composition"] },
+        id: { type: "string" },
+        baseRevision: { type: "integer", minimum: 0 },
+        operationId: { type: "string" },
+        expectedHeadRevision: { type: "integer", minimum: 1 },
+      },
+      required: ["projectId", "kind", "id", "baseRevision", "operationId"],
+    },
+  },
+  {
+    name: "project_member_set",
+    description:
+      "Owner-only explicit sharing or revocation with reader/writer permissions. Account identity and ownership are server-derived.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        targetActorId: { type: "string" },
+        role: { enum: ["reader", "writer", null] },
+        baseRevision: { type: "integer", minimum: 0 },
+        operationId: { type: "string" },
+      },
+      required: [
+        "projectId",
+        "targetActorId",
+        "role",
+        "baseRevision",
+        "operationId",
+      ],
+    },
+  },
+
   ...AUTHORING_TOOLS,
   {
     name: "project_list",
@@ -66,7 +134,8 @@ export const MCP_TOOLS_MANIFEST: McpToolDefinition[] = [
   },
   {
     name: "project_overview",
-    description: "Get authorized project overview, composition list and shared resource counts",
+    description:
+      "Get authorized project overview, composition list and shared resource counts",
     inputSchema: {
       type: "object",
       properties: {
@@ -191,12 +260,7 @@ export const MCP_TOOLS_MANIFEST: McpToolDefinition[] = [
         },
         operationId: { type: "string", description: "Idempotency key" },
       },
-      required: [
-        "projectId",
-        "compositionId",
-        "targetRevision",
-        "operationId",
-      ],
+      required: ["projectId", "compositionId", "targetRevision", "operationId"],
     },
   },
   {
@@ -286,7 +350,8 @@ export const MCP_TOOLS_MANIFEST: McpToolDefinition[] = [
   },
   {
     name: "asset_link",
-    description: "Attach a candidate or selected asset to a shot (maximum 5 candidate images per shot)",
+    description:
+      "Attach a candidate or selected asset to a shot (maximum 5 candidate images per shot)",
     inputSchema: {
       type: "object",
       properties: {
@@ -344,7 +409,8 @@ export const MCP_TOOLS_MANIFEST: McpToolDefinition[] = [
   },
   {
     name: "asset_update_candidate",
-    description: "Update metadata (role, notes, actor) of a shot's candidate asset",
+    description:
+      "Update metadata (role, notes, actor) of a shot's candidate asset",
     inputSchema: {
       type: "object",
       properties: {
@@ -360,7 +426,10 @@ export const MCP_TOOLS_MANIFEST: McpToolDefinition[] = [
           description: "Media kind (default: images)",
         },
         role: { type: "string", description: "Role tag" },
-        actor: { type: "string", description: "Actor or contributor identifier" },
+        actor: {
+          type: "string",
+          description: "Actor or contributor identifier",
+        },
         notes: { type: "string", description: "Notes on candidate" },
       },
       required: [
@@ -521,7 +590,8 @@ export const MCP_TOOLS_MANIFEST: McpToolDefinition[] = [
   },
   {
     name: "shot_subject_bind",
-    description: "Pin a shot to a specific approved subject revision and variant",
+    description:
+      "Pin a shot to a specific approved subject revision and variant",
     inputSchema: {
       type: "object",
       properties: {
@@ -604,13 +674,51 @@ export const MCP_TOOLS_MANIFEST: McpToolDefinition[] = [
 ];
 
 for (const tool of MCP_TOOLS_MANIFEST) {
-  if (["composition_create", "composition_patch", "composition_import", "shot_subject_bind", "subject_create", "subject_patch", "subject_reference_attach", "composition_restore", "subject_approve_revision", "asset_link", "asset_unlink", "asset_update_candidate", "review_approve"].includes(tool.name)) {
+  if (
+    [
+      "composition_create",
+      "composition_patch",
+      "composition_import",
+      "shot_subject_bind",
+      "subject_create",
+      "subject_patch",
+      "subject_reference_attach",
+      "composition_restore",
+      "subject_approve_revision",
+      "asset_link",
+      "asset_unlink",
+      "asset_update_candidate",
+      "review_approve",
+    ].includes(tool.name)
+  ) {
     tool.inputSchema.properties.workflowContext = WORKFLOW_CONTEXT_SCHEMA;
-    tool.description += " In strict projects, read authoring_workflow_get first and provide workflowContext. Raw mixed boards cannot become canonical references.";
+    tool.description +=
+      " In strict projects, read authoring_workflow_get first and provide workflowContext. Raw mixed boards cannot become canonical references.";
   }
-  if (tool.name === "composition_import") tool.inputSchema.properties.baseRevision = { type: "integer", minimum: 0, description: "Required when importing into an existing strict composition." };
-  if (tool.name === "composition_export") tool.inputSchema.properties.targetVersion = { enum: ["video-compose/v1", "video-compose/v2"], description: "v2 material dependencies cannot be dropped for v1 readers." };
-  if (tool.name === "project_create") tool.inputSchema.properties.authoringMode = { enum: ["strict", "legacy"], description: "New projects default to strict. legacy is an explicit archive/compatibility mode." };
+  if (tool.name === "composition_import")
+    tool.inputSchema.properties.baseRevision = {
+      type: "integer",
+      minimum: 0,
+      description:
+        "Required when importing into an existing strict composition.",
+    };
+  if (tool.name === "composition_export")
+    tool.inputSchema.properties.targetVersion = {
+      enum: ["video-compose/v1", "video-compose/v2"],
+      description: "v2 material dependencies cannot be dropped for v1 readers.",
+    };
+  if (tool.name === "project_create")
+    tool.inputSchema.properties.sharingMode = {
+      enum: ["private", "members"],
+      description:
+        "Private by default. Explicitly granted human members enable sharing; only owner can change membership.",
+    };
+  if (tool.name === "project_create")
+    tool.inputSchema.properties.authoringMode = {
+      enum: ["strict", "legacy"],
+      description:
+        "New projects default to strict. legacy is an explicit archive/compatibility mode.",
+    };
 }
 
 function decodeBase64Bytes(base64: string): Uint8Array {
@@ -622,7 +730,89 @@ function decodeBase64Bytes(base64: string): Uint8Array {
   return bytes;
 }
 
+export const MODERN_MCP_VERSION = "2026-07-28";
+export const LEGACY_MCP_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
+
+/** Adapt wire results without changing shared domain operations or legacy payloads. */
 export async function handleMcpJsonRpc(
+  domain: VideoComposeDomainService,
+  actor: ActorIdentity | null,
+  rpc: JsonRpcRequest,
+): Promise<JsonRpcResponse> {
+  const meta = rpc.params?._meta as Record<string, unknown> | undefined;
+  const version = meta?.["io.modelcontextprotocol/protocolVersion"];
+  if (!actor) return handleLegacyMcpJsonRpc(domain, actor, rpc);
+  if (
+    version !== undefined &&
+    version !== MODERN_MCP_VERSION &&
+    !LEGACY_MCP_VERSIONS.includes(String(version))
+  )
+    return {
+      jsonrpc: "2.0",
+      id: rpc.id ?? null,
+      error: {
+        code: -32022,
+        message: "Unsupported protocol version",
+        data: { supported: [MODERN_MCP_VERSION], requested: version },
+      },
+    };
+  if (version === MODERN_MCP_VERSION) {
+    if (rpc.method === "server/discover") {
+      const legacy = await handleLegacyMcpJsonRpc(domain, actor, {
+        jsonrpc: "2.0",
+        id: rpc.id,
+        method: "initialize",
+        params: { protocolVersion: "2025-11-25" },
+      });
+      const info = legacy.result as {
+        instructions: string;
+        serverInfo: unknown;
+      };
+      return {
+        jsonrpc: "2.0",
+        id: rpc.id ?? null,
+        result: {
+          resultType: "complete",
+          supportedVersions: [MODERN_MCP_VERSION],
+          capabilities: { tools: {}, prompts: {}, resources: {} },
+          _meta: { "io.modelcontextprotocol/serverInfo": info.serverInfo },
+          instructions: info.instructions,
+          ttlMs: 0,
+          cacheScope: "private",
+        },
+      };
+    }
+    if (rpc.method === "initialize")
+      return {
+        jsonrpc: "2.0",
+        id: rpc.id ?? null,
+        error: {
+          code: -32601,
+          message:
+            "Modern requests use server/discover; legacy initialize remains available with a legacy version.",
+        },
+      };
+    const response = await handleLegacyMcpJsonRpc(domain, actor, rpc);
+    if (response.result)
+      response.result = {
+        ...(response.result as Record<string, unknown>),
+        resultType: "complete",
+        ...([
+          "tools/list",
+          "prompts/list",
+          "resources/list",
+          "resources/templates/list",
+          "resources/read",
+        ].includes(rpc.method)
+          ? { ttlMs: 0, cacheScope: "private" }
+          : {}),
+      };
+    return response;
+  }
+  return handleLegacyMcpJsonRpc(domain, actor, rpc);
+}
+
+async function handleLegacyMcpJsonRpc(
   domain: VideoComposeDomainService,
   actor: ActorIdentity | null,
   rpc: JsonRpcRequest,
@@ -635,7 +825,8 @@ export async function handleMcpJsonRpc(
       id,
       error: {
         code: -32001,
-        message: "UNAUTHORIZED: Missing or invalid Cloudflare Access credentials.",
+        message:
+          "UNAUTHORIZED: Missing or invalid Cloudflare Access credentials.",
         data: { code: "UNAUTHORIZED" },
       },
     };
@@ -651,8 +842,14 @@ export async function handleMcpJsonRpc(
         jsonrpc: "2.0",
         id,
         result: {
-          protocolVersion: ["2025-03-26", "2025-06-18", "2025-11-25"].includes(requestedVersion) ? requestedVersion : "2025-11-25",
-          instructions: AUTHORING_SERVER_INSTRUCTIONS,
+          protocolVersion: ["2025-03-26", "2025-06-18", "2025-11-25"].includes(
+            requestedVersion,
+          )
+            ? requestedVersion
+            : "2025-11-25",
+          instructions:
+            AUTHORING_SERVER_INSTRUCTIONS +
+            "\nAccounts and recycle bin: New projects are private to the authenticated account. Only the owner may explicitly grant/revoke project members or trash/restore a project. Reader/writer sharing includes nested assets and subjects; writers may trash/restore compositions. Never select an identity via headers or claim another account. Before trash/restore, read current lifecycleRevision and composition headRevision; submit baseRevision, expectedHeadRevision for compositions, and a stable operationId. Use trash_list for deleted items; restore the parent project before child compositions. Restoring a project does not restore separately deleted compositions. composition_restore restores content history, resource_restore restores recycle-bin state.",
           serverInfo: {
             name: "video-compose-mcp",
             version: "0.1.0",
@@ -683,9 +880,32 @@ export async function handleMcpJsonRpc(
       };
     }
 
-    if (["prompts/list", "prompts/get", "resources/list", "resources/templates/list", "resources/read"].includes(rpc.method)) {
-      try { return { jsonrpc: "2.0", id, result: await authoringRpc(domain, actor, rpc) }; }
-      catch (err) { if (err instanceof DomainError) throw err; return { jsonrpc: "2.0", id, error: { code: -32602, message: err instanceof Error ? err.message : String(err) } }; }
+    if (
+      [
+        "prompts/list",
+        "prompts/get",
+        "resources/list",
+        "resources/templates/list",
+        "resources/read",
+      ].includes(rpc.method)
+    ) {
+      try {
+        return {
+          jsonrpc: "2.0",
+          id,
+          result: await authoringRpc(domain, actor, rpc),
+        };
+      } catch (err) {
+        if (err instanceof DomainError) throw err;
+        return {
+          jsonrpc: "2.0",
+          id,
+          error: {
+            code: -32602,
+            message: err instanceof Error ? err.message : String(err),
+          },
+        };
+      }
     }
 
     if (rpc.method === "tools/list") {
@@ -758,17 +978,72 @@ async function dispatchMcpTool(
 ): Promise<unknown> {
   const projectId = String(args.projectId ?? "");
   switch (toolName) {
-    case "authoring_dependencies_get": return domain.authoring.impact(actor, projectId, { id: String(args.id ?? ""), revision: Number(args.revision) });
-    case "authoring_workflow_get": return domain.authoring.workflow(actor, projectId, args.language === "en" ? "en" : "zh");
-    case "authoring_document_list": return domain.authoring.list(actor, projectId);
-    case "authoring_document_get": return domain.authoring.get(actor, projectId, String(args.id ?? ""), args.revision === undefined ? undefined : Number(args.revision));
-    case "reference_plan_validate": return domain.authoring.validate(actor, projectId, args.document);
-    case "authoring_document_put": return domain.authoring.put(actor, args as unknown as Parameters<typeof domain.authoring.put>[1]);
-    case "authoring_document_review": return domain.authoring.review(actor, args as unknown as Parameters<typeof domain.authoring.review>[1]);
-    case "authoring_document_approve": return domain.authoring.approve(actor, args as unknown as Parameters<typeof domain.authoring.approve>[1]);
-    case "generation_inputs_prepare": return domain.authoring.prepare(actor, projectId, args.request, args.workflowContext as WorkflowContext | undefined);
-    case "generation_evidence_record": return domain.authoring.recordEvidence(actor, args as unknown as Parameters<typeof domain.authoring.recordEvidence>[1]);
-    case "generation_evidence_list": return domain.authoring.evidence(actor, projectId);
+    case "trash_list":
+      return domain.lifecycle.list(actor);
+    case "resource_trash":
+    case "resource_restore":
+      return domain.lifecycle.change(actor, {
+        ...args,
+        action: toolName === "resource_trash" ? "trash" : "restore",
+      } as Parameters<typeof domain.lifecycle.change>[1]);
+    case "project_member_set":
+      return domain.setProjectMemberRole(
+        actor,
+        args as Parameters<typeof domain.setProjectMemberRole>[1],
+      );
+    case "authoring_dependencies_get":
+      return domain.authoring.impact(actor, projectId, {
+        id: String(args.id ?? ""),
+        revision: Number(args.revision),
+      });
+    case "authoring_workflow_get":
+      return domain.authoring.workflow(
+        actor,
+        projectId,
+        args.language === "en" ? "en" : "zh",
+      );
+    case "authoring_document_list":
+      return domain.authoring.list(actor, projectId);
+    case "authoring_document_get":
+      return domain.authoring.get(
+        actor,
+        projectId,
+        String(args.id ?? ""),
+        args.revision === undefined ? undefined : Number(args.revision),
+      );
+    case "reference_plan_validate":
+      return domain.authoring.validate(actor, projectId, args.document);
+    case "authoring_document_put":
+      return domain.authoring.put(
+        actor,
+        args as unknown as Parameters<typeof domain.authoring.put>[1],
+      );
+    case "authoring_document_review":
+      return domain.authoring.review(
+        actor,
+        args as unknown as Parameters<typeof domain.authoring.review>[1],
+      );
+    case "authoring_document_approve":
+      return domain.authoring.approve(
+        actor,
+        args as unknown as Parameters<typeof domain.authoring.approve>[1],
+      );
+    case "generation_inputs_prepare":
+      return domain.authoring.prepare(
+        actor,
+        projectId,
+        args.request,
+        args.workflowContext as WorkflowContext | undefined,
+      );
+    case "generation_evidence_record":
+      return domain.authoring.recordEvidence(
+        actor,
+        args as unknown as Parameters<
+          typeof domain.authoring.recordEvidence
+        >[1],
+      );
+    case "generation_evidence_list":
+      return domain.authoring.evidence(actor, projectId);
   }
 
   switch (toolName) {
@@ -786,8 +1061,10 @@ async function dispatchMcpTool(
         id: String(args.id ?? ""),
         name: String(args.name ?? ""),
         authoringMode: args.authoringMode as "strict" | "legacy" | undefined,
+        sharingMode: args.sharingMode as "private" | "members" | undefined,
         description: args.description ? String(args.description) : undefined,
-        members: args.members as Record<string, "reader" | "writer"> | undefined,
+        members: args.members as
+          Record<string, "reader" | "writer"> | undefined,
         operationId: args.operationId ? String(args.operationId) : undefined,
       });
 
@@ -839,7 +1116,10 @@ async function dispatchMcpTool(
 
     case "composition_export":
       return domain.exportCompositionBundle(actor, {
-        targetVersion: args.targetVersion === "video-compose/v1" ? "video-compose/v1" : undefined,
+        targetVersion:
+          args.targetVersion === "video-compose/v1"
+            ? "video-compose/v1"
+            : undefined,
         projectId: String(args.projectId ?? ""),
         compositionId: String(args.compositionId ?? ""),
         revision: typeof args.revision === "number" ? args.revision : undefined,
@@ -848,7 +1128,8 @@ async function dispatchMcpTool(
 
     case "composition_import":
       return domain.importCompositionBundle(actor, {
-        baseRevision: typeof args.baseRevision === "number" ? args.baseRevision : undefined,
+        baseRevision:
+          typeof args.baseRevision === "number" ? args.baseRevision : undefined,
         workflowContext: args.workflowContext as WorkflowContext | undefined,
         projectId: String(args.projectId ?? ""),
         payload: String(args.payload ?? ""),
@@ -879,7 +1160,9 @@ async function dispatchMcpTool(
         width: typeof args.width === "number" ? args.width : undefined,
         height: typeof args.height === "number" ? args.height : undefined,
         durationFrames:
-          typeof args.durationFrames === "number" ? args.durationFrames : undefined,
+          typeof args.durationFrames === "number"
+            ? args.durationFrames
+            : undefined,
       });
     }
 
@@ -894,7 +1177,8 @@ async function dispatchMcpTool(
           {
             op: "attach_shot_candidate",
             shotId: String(args.shotId ?? ""),
-            mediaKind: (args.mediaKind ?? "images") as "images" | "videos" | "audios",
+            mediaKind: (args.mediaKind ?? "images") as
+              "images" | "videos" | "audios",
             candidate: {
               asset: String(args.assetId ?? ""),
               actor: actor.actorId,
@@ -916,7 +1200,8 @@ async function dispatchMcpTool(
           {
             op: "detach_shot_candidate",
             shotId: String(args.shotId ?? ""),
-            mediaKind: (args.mediaKind ?? "images") as "images" | "videos" | "audios",
+            mediaKind: (args.mediaKind ?? "images") as
+              "images" | "videos" | "audios",
             assetId: String(args.assetId ?? ""),
           },
         ],
@@ -933,12 +1218,17 @@ async function dispatchMcpTool(
           {
             op: "update_shot_candidate",
             shotId: String(args.shotId ?? ""),
-            mediaKind: (args.mediaKind ?? "images") as "images" | "videos" | "audios",
+            mediaKind: (args.mediaKind ?? "images") as
+              "images" | "videos" | "audios",
             assetId: String(args.assetId ?? ""),
             candidate: {
               ...(args.role !== undefined ? { role: String(args.role) } : {}),
-              ...(args.actor !== undefined ? { actor: String(args.actor) } : {}),
-              ...(args.notes !== undefined ? { notes: String(args.notes) } : {}),
+              ...(args.actor !== undefined
+                ? { actor: String(args.actor) }
+                : {}),
+              ...(args.notes !== undefined
+                ? { notes: String(args.notes) }
+                : {}),
             },
           },
         ],
@@ -976,8 +1266,13 @@ async function dispatchMcpTool(
         defaultVariant: args.defaultVariant
           ? String(args.defaultVariant)
           : undefined,
-        status: args.status ? (String(args.status) as RevisionStatus) : "candidate",
-        definition: args.definition as { description: string; invariants: string[] },
+        status: args.status
+          ? (String(args.status) as RevisionStatus)
+          : "candidate",
+        definition: args.definition as {
+          description: string;
+          invariants: string[];
+        },
         variants: args.variants as Record<string, SubjectVariant>,
       });
 
