@@ -26,7 +26,7 @@ TypeScript（strict/ESM）贯穿协议、服务与 Web；npm workspaces。
 - Storage: Cloudflare D1（authoritative revisions / ACL / metadata）+ R2（immutable media）。
 - Web: React + Vite，预览/编辑并排，可收起导航或进入专注编辑。
 - Optional: Durable Objects 用于必要时的在线协作通知。
-- **Deploy target**: Cloudflare Workers，已验证域名 `video-compose.talkincode.net`（`talkincode.net` Cloudflare 子域名），UI/API/MCP 统一受 Cloudflare Access Zero Trust SSO 保护；Agent 经受控非交互身份访问，Worker 做项目级授权。
+- **Deploy target**: Cloudflare Workers，正式入口 `vflow.talkincode.net`，旧域名 `video-compose.talkincode.net` 保留兼容（`talkincode.net` Cloudflare 子域名），UI/API/MCP 统一受 Cloudflare Access Zero Trust SSO 保护；Agent 经受控非交互身份访问，Worker 做项目级授权。
 - **GitHub-to-Workers**: 首选 Cloudflare Workers Builds 与 GitHub `main` 集成部署；GitHub Actions + Wrangler 仅作为替代部署路径，两者不并行部署生产。详见 [deployment](docs/deployment.md)。
 详见 [architecture](docs/architecture.md)。
 
@@ -52,6 +52,10 @@ npm run test:browser
 浏览器验收会启动仅监听回环地址的本地测试服务，使用合成媒体和 100 个分镜，不连接生产数据。`scripts/ui-test-server.ts` 不属于生产 Worker。
 
 通过目标提交的 CI 后，已登录正确 Cloudflare 账户的维护者运行 `npm run deploy`。部署前后核对 Worker 版本、D1/R2 绑定、Access 保护和登录后的真实界面，不能把本地构建成功当成线上发布成功。
+
+## MCP 接入
+
+正式网站：`https://vflow.talkincode.net`；Remote MCP：`https://vflow.talkincode.net/mcp`。OAuth discovery 根据请求域名生成 issuer 和端点；UI/API 使用 Cloudflare Access，MCP 使用 OAuth Bearer 与项目 ACL。已有旧域名连接保持兼容，新配置使用 vflow。
 
 ## Quality & contributions
 请先阅读 [AGENTS.md](AGENTS.md) 及 [roadmap acceptance matrix](docs/roadmap.md#验收矩阵业务能力覆盖矩阵)。新增一级能力必须补充 Happy Path E2E；高风险、权限及状态修改必须验证失败和恢复路径。禁止为功能开发而扩大非目标范围。

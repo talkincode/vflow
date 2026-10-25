@@ -5,7 +5,7 @@
 ## Fixed target
 - **Public source**: `https://github.com/talkincode/video-compose`, canonical deployment branch `main`.
 - **Application runtime**: **Cloudflare Workers**, TypeScript (`video-compose`). Frontend React/Vite output (`apps/web/dist`) is served by the same Worker using Workers Static Assets (`ASSETS`, with `run_worker_first: ["/v1/*", "/mcp"]`); API and MCP use the Worker route. `workers_dev` is disabled (`false`) to prevent bypassing custom domain Access controls.
-- **Hostname**: `https://video-compose.talkincode.net` (verified Custom Domain route on zone `talkincode.net` / `e452c151cde1d9856336ffd76f80bf75`).
+- **Canonical hostname**: `https://vflow.talkincode.net`; retain `https://video-compose.talkincode.net` as a compatibility alias on the same Worker. The vflow route and Access destinations must be independently read back after promotion. Zone: `talkincode.net` / `e452c151cde1d9856336ffd76f80bf75`.
 - **State**: Cloudflare D1 (`video-compose-db`, ID `028d0760-9c64-4f4d-876e-8e6b33236acc`, schema migration `0001_initial.sql` applied) for project and revision metadata; private R2 (`video-compose-media`) for immutable reference images/audio/video and other media; no per-file permanent signed URLs in composition definitions.
 
 ## Identity and authorization
@@ -95,3 +95,11 @@
 ## Reference authoring migration (local implementation, not a deployment record)
 
 Apply `0003_reference_authoring.sql` along with any earlier unapplied migrations before releasing code that reads reference_documents/reference_evidence. The migration is additive and does not rewrite existing projects; absent policy means legacy. Back up D1 before migration and retain new tables on rollback. Never let an old writer drop v2 authoring dependencies; close old write ingress before rolling back, and use a compatible repair build for v2 data. See [reference authoring compatibility/rollback](reference-authoring.md#v1v2d1-迁移与回滚). Local passing tests do not establish a production rollout or authenticated live acceptance.
+
+## VFlow canonical hostname release
+
+Canonical browser/API origin is `https://vflow.talkincode.net`; Remote MCP is `https://vflow.talkincode.net/mcp`. Keep the old hostname as a compatibility alias to preserve existing OAuth clients, project links and sessions. Both hostnames route to the existing `video-compose` Worker and share the same D1/R2; no project copy or media rewrite is needed.
+
+Before exposing the new route, extend the existing Access application destinations to cover both root hostnames, preserving the existing human/service policies. Extend only the existing machine application paths for MCP, token/register/revoke and well-known metadata. `/oauth/authorize` and `/v1/*` remain behind the root SSO gate. The Worker independently requires Bearer authentication for anonymous machine requests. Verify the new hostname's metadata uses its own issuer, authorization, token and resource URLs; do not redirect POST /mcp to another host.
+
+The deployment uses Wrangler as the sole deployer; the live Workers Builds trigger list was empty at release preparation. Record exact-SHA CI, a pre-migration D1 export/bookmark, previous Worker version `118ca0e9-b626-42f8-accf-cb99958b510e`, migration status, active deployment and authenticated browser/API/MCP readback in the private release evidence.

@@ -587,7 +587,7 @@ export function renderConsentPage(params: {
     <div class="eyebrow">Video Compose · MCP 授权</div>
     <h1>连接外部 Agent 客户端</h1>
     <p>客户端 <strong>${escapeHtml(params.clientName)}</strong> 正在请求通过 Model Context Protocol 访问您的项目与编排工作区。</p>
-    
+
     <div class="details">
       <div class="details-row">
         <span class="details-label">登录身份</span>

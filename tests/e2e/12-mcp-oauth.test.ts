@@ -25,6 +25,19 @@ async function createPkcePair(): Promise<{ verifier: string; challenge: string }
 }
 
 describe("E2E 12 — MCP OAuth 2.1 (RFC 9728, RFC 8414, RFC 7591, PKCE S256)", () => {
+  it("uses the requested vflow origin for OAuth discovery and Bearer challenges while preserving the old hostname", async () => {
+    const { app } = createApiApp();
+    for (const origin of ["https://vflow.talkincode.net", "https://video-compose.talkincode.net"]) {
+      const metadata = await app.request(`${origin}/.well-known/oauth-authorization-server`);
+      expect(await metadata.json()).toMatchObject({ issuer: origin, authorization_endpoint: `${origin}/oauth/authorize`, token_endpoint: `${origin}/oauth/token`, registration_endpoint: `${origin}/oauth/register` });
+      const resource = await app.request(`${origin}/.well-known/oauth-protected-resource/mcp`);
+      expect(await resource.json()).toMatchObject({ resource: `${origin}/mcp`, authorization_servers: [origin] });
+      const unauthorized = await app.request(`${origin}/mcp`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "domain", method: "tools/list" }) });
+      expect(unauthorized.status).toBe(401);
+      expect(unauthorized.headers.get("www-authenticate")).toContain(`resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"`);
+    }
+  });
+
   it("Happy Path: Complete OAuth 2.1 flow connects client, negotiates PKCE, and enables MCP tool execution", async () => {
     const { app, domain } = createApiApp();
 
