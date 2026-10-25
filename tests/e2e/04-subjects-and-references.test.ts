@@ -6,7 +6,7 @@ describe("E2E 04 — 角色/道具设定与参考图管理 (Subject & Reference 
   it("Happy Path: creates character & prop with candidate status, approves revisions, binds across compositions, and preserves old bindings when new subject revision is created", async () => {
     const { writerClient, agentAClient } = createTestHarness();
 
-    await writerClient.createProject({
+    await writerClient.createProject({ authoringMode: "legacy",
       id: "demo",
       name: "Demo",
       members: {
@@ -234,7 +234,7 @@ describe("E2E 04 — 角色/道具设定与参考图管理 (Subject & Reference 
     const { writerClient, readerClient, agentAClient, agentBClient } =
       createTestHarness();
 
-    await writerClient.createProject({
+    await writerClient.createProject({ authoringMode: "legacy",
       id: "demo",
       name: "Demo",
       members: {

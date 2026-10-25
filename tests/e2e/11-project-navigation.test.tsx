@@ -160,11 +160,12 @@ describe("E2E 11 — 项目入口、编排导航与创建恢复", () => {
       operationId: "project-once",
     };
     const project = await h.writerClient.createProject(request);
+    await h.writerClient.getAuthoringWorkflow(request.id);
     expect(await h.writerClient.callMcpTool("project_create", request)).toEqual(
       project,
     );
     await expect(
-      h.writerClient.createProject({ ...request, name: "Overwrite" }),
+      h.writerClient.createProject({ authoringMode: "legacy", ...request, name: "Overwrite" }),
     ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
     await expect(h.outsiderClient.createProject(request)).rejects.toMatchObject(
       { code: "ALREADY_EXISTS" },
@@ -176,7 +177,7 @@ describe("E2E 11 — 项目入口、编排导航与创建恢复", () => {
     };
     const revision = await h.writerClient.createComposition(composition);
     expect(
-      await h.writerClient.callMcpTool("composition_create", composition),
+      await h.writerClient.callMcpTool("composition_create", { ...composition, workflowContext: (await h.writerClient.getAuthoringWorkflow(project.id)).workflowContext }),
     ).toEqual(revision);
     await expect(
       h.writerClient.createComposition({
@@ -201,7 +202,7 @@ describe("E2E 11 — 项目入口、编排导航与创建恢复", () => {
       h.writerClient.createComposition(composition),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     // Being a reader in another project does not prevent creating one's own project.
-    const own = await h.writerClient.createProject({ id: "own", name: "Own" });
+    const own = await h.writerClient.createProject({ authoringMode: "legacy", id: "own", name: "Own" });
     expect((await h.writerClient.getProjectOverview(own.id)).role).toBe(
       "writer",
     );
@@ -257,7 +258,7 @@ describe("E2E 11 — 项目入口、编排导航与创建恢复", () => {
   it("opens encoded identifiers, returns from forbidden/missing links and never bootstraps a guessed target", async () => {
     const h = await seeded();
     const unicodeId = "城市 空间";
-    await h.writerClient.createProject({ id: unicodeId, name: "编码项目" });
+    await h.writerClient.createProject({ authoringMode: "legacy", id: unicodeId, name: "编码项目" });
     await h.writerClient.createComposition({
       projectId: unicodeId,
       document: projectComposition(unicodeId, "第一集", "编码编排", "开场"),

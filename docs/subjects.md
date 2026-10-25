@@ -1,6 +1,6 @@
 # Subject Definition and Reference Packs — design draft
 
-**Status: planned, not implemented.** Project-level first-class character and prop definition management, independent of specific generation providers. Read with [protocol.md](protocol.md) and [architecture.md](architecture.md).
+**Status: implemented locally and tested; typed reference workflow documented in [reference-authoring.md](reference-authoring.md).** Project-level first-class character and prop definition management, independent of specific generation providers. Read with [protocol.md](protocol.md) and [architecture.md](architecture.md).
 
 ## Core distinction
 
@@ -11,7 +11,7 @@
 - **ReferencePack**: multiple typed references to immutable assets; each entry has view/role, `status` (`candidate` | `approved`), notes, order and provenance.
 - **ShotSubjectBinding**: `subjectId`, exact `subjectRevision`, optional `variant` (resolving to the bound revision's `defaultVariant` when omitted). A Shot may bind multiple Subjects; all referenced definitions are project-scoped and resolvable.
 
-Subject and reference-pack data are logical, portable protocol constructs; D1/R2 is the planned hosting implementation, not part of the interchange format.
+Subject and reference-pack data are logical, portable protocol constructs; D1/R2 is the hosting implementation, not part of the interchange format.
 
 ## Example subject (illustrative YAML)
 
@@ -82,10 +82,16 @@ shots:
 - All UI operations map to the same domain API exposed through authenticated MCP (`reader` for queries, `writer` for mutations): `subject_list`, `subject_get`, `subject_create`, `subject_patch`, `subject_reference_attach`, `subject_approve_revision`, `shot_subject_bind`, `subject_usage`.
 - Creating images, enforcing visual consistency via computer vision and model routing remain responsibilities of external agents; this platform provides reliable definitions, references and change history.
 
-## Required E2E acceptance (planned, no tests exist yet)
+## Required E2E acceptance (covered by tests/e2e/04, 14 and 15)
 
 1. Create character and prop subjects, upload multiple reference images, approve revisions, and bind them to two shots in separate compositions; both resolve the same version-pinned packs.
 2. Produce a new character appearance revision and a damaged-prop variant; old shots retain the old packs, while explicitly rebound shots see the new version.
 3. Simultaneous subject edits to the same semantic field report a machine-readable conflict rather than silently overwrite one agent.
 4. Upload a corrupted/reference-missing asset or attempt unauthorized approval; the operation fails atomically, preserving the previous canonical pack.
 5. Export and reimport a composition plus its dependency manifest; exact subject version identities and pack references remain stable.
+
+## Typed reference packs and strict projects
+
+SubjectKind remains character/prop. Scenes are separate immutable reference-workflow documents with geometry anchors and environment variants. Strict projects require per-view typed reference approval before subject promotion; face/body sheets and prop catalogs are distinct packs. Candidate subject definitions precede reference authoring, so approval has no circular prerequisite.
+
+`authoring_document_put/review/approve` append immutable material revisions; Subject approval still freezes its existing candidate revision only after checking exact owner/revision/variant coverage. Direct `status: approved` cannot bypass this check. Old project behavior remains available through the explicit legacy boundary; old approved status is not an assertion that images passed the new visual checks. See [reference authoring](reference-authoring.md) for guidance, JSON contracts, scope checks and migration.

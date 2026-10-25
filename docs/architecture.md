@@ -79,3 +79,13 @@ scripts/ui-test-server.ts # isolated, loopback-only acceptance fixture; not depl
 
 ## Quality
 Protocol canonicalization, stable IDs, no destructive patching, authorization, deterministic change semantics and historical asset dereference are correctness boundaries. Validate these before treating the UI as complete.
+
+## Versioned reference authoring
+
+`ReferenceAuthoringService` is shared by REST, MCP and the web client. `packages/protocol/src/authoring.ts` owns the typed policy/scene/reference-pack/storyboard/input contracts; `authoring-guidance.ts` owns versioned bilingual rules and seven reusable prompts. Scenes do not extend the v1 SubjectKind enum. Composition v2 pins exact material revisions through a typed `set_authoring` operation.
+
+D1 migration 0003 adds whole-record immutable material histories and external input evidence, persisted in the existing CAS transaction. No media processing runtime or separate authorization system is added. New projects get an approved strict policy atomically with creation; old projects without one remain legacy. Context checks prove version agreement; structural scope, explicit visual reviews and exact input preparation enforce production prerequisites.
+
+A portable v2 bundle includes transitive material/subject/asset metadata and fixed composition baselines required by storyboard sequences. Import validates hashes, immutable conflicts, chronology and lineage atomically, preserves existing history, and refuses v1 overwrites of v2 semantics. Existing strict imports require baseRevision, and operationId receipts prevent duplicate imports after lost responses.
+
+The web reference workspace displays clean independent tiles and source boards with selectable crop overlays. Metadata and review controls are outside image pixels. It records unknown versus passed checks, previews prepared/actual inputs, and preserves editing content after failure. Read-only viewers can inspect and prepare but cannot promote or write. Full workflow, limitations, compatibility and rollback: [reference-authoring.md](reference-authoring.md).

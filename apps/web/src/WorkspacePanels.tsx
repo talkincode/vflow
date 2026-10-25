@@ -19,6 +19,7 @@ interface LibraryProps {
   client: VideoComposeClient;
   projectId: string;
   activeShotId: string | null;
+  activeShot?: ShotDefinition;
   assets: AssetRecord[];
   disabled: boolean;
   onRefresh: () => Promise<void>;
@@ -54,6 +55,7 @@ export function AssetLibrary({
   client,
   projectId,
   activeShotId,
+  activeShot,
   assets,
   failed,
   active,
@@ -132,80 +134,168 @@ export function AssetLibrary({
                 (filter === "all" || asset.mimeType.startsWith(filter)) &&
                 asset.id.toLowerCase().includes(query.toLowerCase()),
             )
-            .map((asset) => (
-              <article className="asset-card" key={asset.id}>
-                {active && (
-                  <MediaPreview
-                    key={asset.id}
-                    asset={asset}
-                    url={client.assetContentUrl(projectId, asset.id)}
-                  />
-                )}
-                <div className="asset-card-content">
-                  <strong>{asset.id}</strong>
-                  <span>
-                    {asset.mimeType} · {(asset.sizeBytes / 1024).toFixed(1)} KB
-                  </span>
-                  {activeShotId && (
-                    <button
-                      disabled={
-                        disabled ||
-                        !/^(image|video|audio)\//.test(asset.mimeType)
-                      }
-                      onClick={() =>
-                        void run(() =>
-                          patch(
-                            [
-                              {
-                                op: "attach_shot_candidate",
-                                shotId: activeShotId,
-                                mediaKind: asset.mimeType.startsWith("image/")
-                                  ? "images"
-                                  : asset.mimeType.startsWith("video/")
-                                    ? "videos"
-                                    : "audios",
-                                candidate: { asset: asset.id },
-                              },
-                            ],
-                            `添加 ${asset.id} 为 ${activeShotId} 候选素材`,
-                          ),
-                        )
-                      }
-                    >
-                      关联至当前镜头的候选集
-                    </button>
+            .map((asset) => {
+              const isImage = asset.mimeType.startsWith("image/");
+              const isVideo = asset.mimeType.startsWith("video/");
+              const isAudio = asset.mimeType.startsWith("audio/");
+              const isMedia = isImage || isVideo || isAudio;
+              const isAttachedImage = Boolean(
+                activeShot?.candidates.images.some((c) => c.asset === asset.id),
+              );
+              const isAttachedVideo = Boolean(
+                activeShot?.candidates.videos.some((c) => c.asset === asset.id),
+              );
+              const isAttachedAudio = Boolean(
+                activeShot?.candidates.audios.some((c) => c.asset === asset.id),
+              );
+              const isAttached =
+                isAttachedImage || isAttachedVideo || isAttachedAudio;
+              const candidateImageCount =
+                activeShot?.candidates.images.length ?? 0;
+
+              return (
+                <article
+                  className="asset-card"
+                  key={asset.id}
+                  data-testid={`asset-card-${asset.id}`}
+                >
+                  {active && (
+                    <MediaPreview
+                      key={asset.id}
+                      asset={asset}
+                      url={client.assetContentUrl(projectId, asset.id)}
+                    />
                   )}
-                  {activeShotId && /^(video|audio)\//.test(asset.mimeType) && (
+                  <div className="asset-card-content">
+                    <strong>{asset.id}</strong>
+                    <span>
+                      {asset.mimeType} · {(asset.sizeBytes / 1024).toFixed(1)} KB
+                    </span>
+                    {activeShotId && isMedia && (
+                      isAttached ? (
+                        <button
+                          className="secondary"
+                          disabled={disabled}
+                          data-testid={`detach-candidate-${asset.id}`}
+                          onClick={() =>
+                            void run(() =>
+                              patch(
+                                [
+                                  {
+                                    op: "detach_shot_candidate",
+                                    shotId: activeShotId,
+                                    mediaKind: isAttachedImage
+                                      ? "images"
+                                      : isAttachedVideo
+                                        ? "videos"
+                                        : "audios",
+                                    assetId: asset.id,
+                                  },
+                                ],
+                                `从 ${activeShotId} 移除素材 ${asset.id}`,
+                              ),
+                            )
+                          }
+                        >
+                          从当前镜头移除
+                        </button>
+                      ) : isImage && candidateImageCount >= 5 ? (
+                        <button
+                          disabled={true}
+                          data-testid={`attach-candidate-${asset.id}`}
+                          title="当前镜头已达最多 5 个素材图上限"
+                        >
+                          关联至当前镜头 (已达 5 张上限)
+                        </button>
+                      ) : (
+                        <button
+                          disabled={disabled}
+                          data-testid={`attach-candidate-${asset.id}`}
+                          onClick={() =>
+                            void run(() =>
+                              patch(
+                                [
+                                  {
+                                    op: "attach_shot_candidate",
+                                    shotId: activeShotId,
+                                    mediaKind: isImage
+                                      ? "images"
+                                      : isVideo
+                                        ? "videos"
+                                        : "audios",
+                                    candidate: { asset: asset.id },
+                                  },
+                                ],
+                                `添加 ${asset.id} 为 ${activeShotId} 候选素材`,
+                              ),
+                            )
+                          }
+                        >
+                          {isImage
+                            ? `关联至当前镜头 (${candidateImageCount}/5)`
+                            : "关联至当前镜头的候选集"}
+                        </button>
+                      )
+                    )}
+                    {activeShotId && /^(video|audio)\//.test(asset.mimeType) && (
+                      <button
+                        disabled={disabled}
+                        onClick={() =>
+                          void run(() =>
+                            patch(
+                              [
+                                {
+                                  op: "select_shot_output",
+                                  shotId: activeShotId,
+                                  mediaKind: asset.mimeType.startsWith("video/")
+                                    ? "video"
+                                    : "audio",
+                                  assetId: asset.id,
+                                },
+                              ],
+                              `为 ${activeShotId} 选用 ${asset.id}`,
+                            ),
+                          )
+                        }
+                      >
+                        选用为当前镜头输出
+                      </button>
+                    )}
                     <button
+                      className="danger"
                       disabled={disabled}
+                      data-testid={`delete-asset-${asset.id}`}
                       onClick={() =>
-                        void run(() =>
-                          patch(
-                            [
-                              {
-                                op: "select_shot_output",
-                                shotId: activeShotId,
-                                mediaKind: asset.mimeType.startsWith("video/")
-                                  ? "video"
-                                  : "audio",
-                                assetId: asset.id,
-                              },
-                            ],
-                            `为 ${activeShotId} 选用 ${asset.id}`,
-                          ),
-                        )
+                        void run(async () => {
+                          let confirmDelete = true;
+                          try {
+                            if (
+                              typeof window !== "undefined" &&
+                              typeof window.confirm === "function"
+                            ) {
+                              confirmDelete = window.confirm(
+                                `确定要从项目中删除素材 ${asset.id} 吗？`,
+                              );
+                            }
+                          } catch {
+                            confirmDelete = true;
+                          }
+                          if (!confirmDelete) return;
+                          await client.deleteAsset(projectId, asset.id);
+                          await onRefresh();
+                        })
                       }
                     >
-                      选用为当前镜头输出
+                      删除素材
                     </button>
-                  )}
-                  <details>
-                    <summary>文件详情</summary>
-                    <code>SHA-256 {asset.sha256}</code>
-                  </details>
-                </div>
-              </article>
-            ))}
+                    <details>
+                      <summary>文件详情</summary>
+                      <code>SHA-256 {asset.sha256}</code>
+                    </details>
+                  </div>
+                </article>
+              );
+            })}
         </div>
       )}
     </>

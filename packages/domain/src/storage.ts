@@ -11,6 +11,8 @@ import {
 } from "./types.ts";
 
 export interface DomainStateSnapshot {
+  materials: Record<string, import("@video-compose/protocol").MaterialRecord>;
+  generationEvidence: Record<string, import("@video-compose/protocol").GenerationEvidence>;
   projects: Record<string, ProjectRecord>;
   assets: Record<string, AssetRecord>;
   uploadSessions: Record<string, UploadSessionRecord>;
@@ -33,6 +35,8 @@ export interface DomainStateSnapshot {
 
 export function createEmptyStateSnapshot(): DomainStateSnapshot {
   return {
+    materials: {},
+    generationEvidence: {},
     projects: {},
     assets: {},
     uploadSessions: {},

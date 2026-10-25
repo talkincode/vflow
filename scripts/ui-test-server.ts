@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createApiApp } from "../apps/api/src/app.ts";
 import { VideoComposeClient } from "../packages/client/src/index.ts";
+import { seedReferences } from "../tests/e2e/reference-fixture.ts";
 import { seedWorkbench } from "../tests/e2e/workbench-fixture.ts";
 import { seedProjectLibrary } from "../tests/e2e/project-fixture.ts";
 if (process.env.NODE_ENV === "production")
@@ -34,10 +35,16 @@ const server = createServer(async (request, response) => {
       response.end("reset");
       return;
     }
+    if (url.pathname === "/__test/reference-fixture" && request.method === "POST") {
+      const client = new VideoComposeClient({ baseUrl: "http://localhost", headers: writer, fetchFn: (input, init) => backend.app.fetch(new Request(String(input), init)) });
+      await seedReferences(client);
+      response.end("reference fixture ready");
+      return;
+    }
     if (url.pathname === "/__test/fail-next" && request.method === "POST") {
       const stage = url.searchParams.get("stage") ?? "patchComposition";
       if (
-        !["patchComposition", "createProject", "createComposition"].includes(
+        !["patchComposition", "createProject", "createComposition", "authoringWrite", "authoringEvidence"].includes(
           stage,
         )
       ) {

@@ -1,3 +1,6 @@
+import { ReferenceAuthoringService, initialProjectPolicy, assertWorkflowContext, assertStrictSubjectReferences, isStrictProject, materialRevision, validateMaterial } from "./authoring.ts";
+import { imageDimensions } from "./image-metadata.ts";
+import type { WorkflowContext } from "@video-compose/protocol";
 import {
   canonicalizeJson,
   type ActorIdentity,
@@ -6,7 +9,6 @@ import {
   parseBundleInterchange,
   type PortableCompositionBundle,
   type ProjectRole,
-  PROTOCOL_VERSION,
   type ReferencePackEntry,
   type RevisionStatus,
   serializeBundleInterchange,
@@ -14,6 +16,7 @@ import {
   type SubjectKind,
   type SubjectSnapshot,
   type SubjectVariant,
+  materialAssetIds, materialPins,
   validateCompositionDocument,
   validateSubjectSnapshot,
 } from "@video-compose/protocol";
@@ -51,9 +54,11 @@ function compositeKey(projectId: string, entityId: string): string {
 
 export class VideoComposeDomainService {
   readonly store: DomainStore;
+  readonly authoring: ReferenceAuthoringService;
 
   constructor(store?: DomainStore) {
     this.store = store ?? new TransactionalMemoryStore();
+    this.authoring = new ReferenceAuthoringService(this.store, (state, projectId, actor, role) => this.assertProjectPermission(state, projectId, actor, role));
   }
 
   private assertAuthenticated(actor: ActorIdentity | null | undefined): ActorIdentity {
@@ -96,6 +101,7 @@ export class VideoComposeDomainService {
   ): {
     availableAssets: Set<string>;
     availableSubjects: Map<string, SubjectSnapshot>;
+    availableMaterials: Map<string, import("@video-compose/protocol").MaterialRevision>;
   } {
     const availableAssets = new Set<string>();
     for (const asset of Object.values(state.assets)) {
@@ -113,7 +119,9 @@ export class VideoComposeDomainService {
       }
     }
 
-    return { availableAssets, availableSubjects };
+    const availableMaterials = new Map<string, import("@video-compose/protocol").MaterialRevision>();
+    for (const record of Object.values(state.materials)) if (record.projectId === projectId) for (const rev of Object.values(record.revisions)) availableMaterials.set(`${record.id}@${rev.revision}`, rev);
+    return { availableAssets, availableSubjects, availableMaterials };
   }
 
   async getProjectAccess(
@@ -137,11 +145,12 @@ export class VideoComposeDomainService {
       name: string;
       description?: string;
       members?: Record<string, ProjectRole>;
+      authoringMode?: "strict" | "legacy";
       operationId?: string;
     },
   ): Promise<ProjectRecord> {
     const authActor = this.assertAuthenticated(actor);
-    if (!input.id?.trim() || !input.name?.trim()) {
+    if (!input.id?.trim() || !input.name?.trim() || (input.authoringMode !== undefined && !["strict", "legacy"].includes(input.authoringMode))) {
       throw new DomainError("VALIDATION_FAILED", "Project id and name are required.");
     }
 
@@ -154,7 +163,7 @@ export class VideoComposeDomainService {
         : undefined;
       const fingerprint = canonicalizeJson({
         id: input.id, name: input.name,
-        description: input.description || null, members: input.members ?? {},
+        description: input.description || null, members: input.members ?? {}, authoringMode: input.authoringMode ?? "strict",
       });
       const receipt = receiptKey
         ? draft.idempotencyRecords[receiptKey] as { fingerprint: string; result: ProjectRecord } | undefined
@@ -183,6 +192,7 @@ export class VideoComposeDomainService {
         members,
       };
       draft.projects[input.id] = record;
+      draft.materials[compositeKey(input.id, "workflow-policy")] = initialProjectPolicy(input.id, authActor, input.authoringMode ?? "strict");
       if (receiptKey) {
         draft.idempotencyRecords[receiptKey] = { fingerprint, result: structuredClone(record) };
       }
@@ -397,6 +407,7 @@ export class VideoComposeDomainService {
       );
     }
 
+    const dimensions = session.mimeType.startsWith("image/") ? imageDimensions(storedObj.data) : undefined;
     return this.store.runInTransaction("finalizeAssetUpload", (draft) => {
       const { actor: authActor } = this.assertProjectPermission(
         draft,
@@ -429,7 +440,8 @@ export class VideoComposeDomainService {
         ...(session.durationFrames !== undefined
           ? { durationFrames: session.durationFrames }
           : {}),
-        ...(session.lineage ? { lineage: structuredClone(session.lineage) } : {}),
+        lineage: { ...(session.lineage ?? {}), mediaDimensions: { verified: Boolean(dimensions), source: "file-header" } },
+        ...(dimensions ?? {}),
         createdAt: new Date().toISOString(),
         createdBy: authActor.actorId,
       };
@@ -572,6 +584,10 @@ export class VideoComposeDomainService {
         throw new DomainError("NOT_FOUND", `Asset '${assetId}' not found.`);
       }
 
+      if (Object.values(draft.materials).some(r => r.projectId === projectId && Object.values(r.revisions).some(v => materialAssetIds(v.document).includes(assetId))) || Object.values(draft.generationEvidence).some(r => r.projectId === projectId && [...r.outputs, ...r.actualInputs.map(a => a.asset), ...r.packet.inputs.map(a => a.asset)].includes(assetId))) {
+        throw new DomainError("DEPENDENCY_ERROR", "Asset is retained by reference workflow or execution history.");
+      }
+
       for (const subj of Object.values(draft.subjects)) {
         if (subj.projectId !== projectId) continue;
         for (const rev of Object.values(subj.revisions)) {
@@ -627,6 +643,7 @@ export class VideoComposeDomainService {
     actor: ActorIdentity | null | undefined,
     input: {
       projectId: string;
+      workflowContext?: WorkflowContext;
       id: string;
       kind: SubjectKind;
       name: string;
@@ -641,6 +658,7 @@ export class VideoComposeDomainService {
   ): Promise<SubjectRecord> {
     return this.store.runInTransaction("createSubject", (draft) => {
       this.assertProjectPermission(draft, input.projectId, actor, "writer");
+      assertWorkflowContext(draft, input.projectId, input.workflowContext);
       const sKey = compositeKey(input.projectId, input.id);
       if (draft.subjects[sKey]) {
         throw new DomainError(
@@ -674,6 +692,7 @@ export class VideoComposeDomainService {
         );
       }
 
+      if (snapshot.status === "approved") assertStrictSubjectReferences(draft, input.projectId, snapshot, input.workflowContext);
       const record: SubjectRecord = {
         id: snapshot.id,
         projectId: input.projectId,
@@ -697,6 +716,7 @@ export class VideoComposeDomainService {
       subjectId: string;
       baseRevision: number;
       operationId: string;
+      workflowContext?: WorkflowContext;
       changes: SubjectPatchChanges;
     },
   ): Promise<SubjectSnapshot> {
@@ -707,6 +727,7 @@ export class VideoComposeDomainService {
         actor,
         "writer",
       );
+      assertWorkflowContext(draft, input.projectId, input.workflowContext);
       const idemKey = `subject_patch::${input.projectId}::${input.operationId}`;
       if (draft.idempotencyRecords[idemKey]) {
         return draft.idempotencyRecords[idemKey] as SubjectSnapshot;
@@ -862,6 +883,7 @@ export class VideoComposeDomainService {
     ];
 
     return this.patchSubject(actor, {
+      workflowContext: input.workflowContext,
       projectId: input.projectId,
       subjectId: input.subjectId,
       baseRevision: input.baseRevision,
@@ -884,6 +906,7 @@ export class VideoComposeDomainService {
       subjectId: string;
       revision: number;
       operationId: string;
+      workflowContext?: WorkflowContext;
     },
   ): Promise<SubjectSnapshot> {
     return this.store.runInTransaction("approveSubjectRevision", (draft) => {
@@ -926,6 +949,7 @@ export class VideoComposeDomainService {
         );
       }
 
+      assertStrictSubjectReferences(draft, input.projectId, snapshot, input.workflowContext);
       subject.revisions[input.revision] = snapshot;
       subject.latestApprovedRevision = Math.max(
         subject.latestApprovedRevision ?? 0,
@@ -1032,6 +1056,19 @@ export class VideoComposeDomainService {
     projectId: string,
     doc: CompositionDocument,
   ): void {
+    const materials = (doc.authoring?.materials ?? []).map(pin => {
+      const ref = materialRevision(state, projectId, pin);
+      if (!ref || ref.status !== "approved" || !validateMaterial(state, projectId, ref.document).ready) throw new DomainError("REFERENCE_REVIEW_REQUIRED", "Composition needs approved, valid material revisions.", { pin });
+      return ref;
+    });
+    if (isStrictProject(state, projectId)) {
+      const approvedAssets = new Set(materials.flatMap(r => r.document.kind === "reference_pack" ? r.document.views.map(v => v.asset) : r.document.kind === "storyboard_sequence" ? r.document.panels.map(p => p.asset) : []));
+      for (const [shotId, shot] of Object.entries(doc.shots)) for (const image of shot.references.images) {
+        if (!approvedAssets.has(image.asset)) throw new DomainError("REFERENCE_REVIEW_REQUIRED", "Direct references require an explicitly pinned approved material; mixed/raw assets remain archive-only.", { asset: image.asset });
+        const scoped = materials.some(r => r.document.kind === "reference_pack" ? r.document.views.some(v => v.asset === image.asset && (v.owner.kind === "scene" || shot.subjects.some(b => b.subjectId === v.owner.id && b.subjectRevision === v.owner.revision && (b.variant ?? state.subjects[compositeKey(projectId, b.subjectId)]?.revisions[b.subjectRevision]?.defaultVariant) === v.owner.variant))) : r.document.kind === "storyboard_sequence" && r.document.panels.some(p => p.asset === image.asset && p.shotId === shotId && r.document.kind === "storyboard_sequence" && r.document.compositionId === doc.id));
+        if (!scoped) throw new DomainError("REFERENCE_SCOPE_MISMATCH", "Image owner/panel does not match the shot's fixed subject bindings.", { shotId, asset: image.asset });
+      }
+    }
     for (const [shotId, shot] of Object.entries(doc.shots)) {
       for (const binding of shot.subjects) {
         const sKey = compositeKey(projectId, binding.subjectId);
@@ -1064,6 +1101,7 @@ export class VideoComposeDomainService {
     actor: ActorIdentity | null | undefined,
     input: {
       projectId: string;
+      workflowContext?: WorkflowContext;
       document: CompositionDocument;
       operationId?: string;
     },
@@ -1076,6 +1114,7 @@ export class VideoComposeDomainService {
         "writer",
       );
 
+      assertWorkflowContext(draft, input.projectId, input.workflowContext);
       const receiptKey = input.operationId
         ? canonicalizeJson([
             "composition-create", input.projectId, authActor.actorKind,
@@ -1251,6 +1290,7 @@ export class VideoComposeDomainService {
     actor: ActorIdentity | null | undefined,
     input: {
       projectId: string;
+      workflowContext?: WorkflowContext;
       compositionId: string;
       baseRevision: number;
       operationId: string;
@@ -1284,6 +1324,7 @@ export class VideoComposeDomainService {
         };
       }
 
+      assertWorkflowContext(draft, input.projectId, input.workflowContext);
       const cKey = compositeKey(input.projectId, input.compositionId);
       const comp = draft.compositions[cKey];
       if (!comp) {
@@ -1412,6 +1453,7 @@ export class VideoComposeDomainService {
       compositionId: string;
       targetRevision: number;
       operationId: string;
+      workflowContext?: WorkflowContext;
     },
   ): Promise<CompositionRevisionRecord> {
     return this.store.runInTransaction("restoreCompositionRevision", (draft) => {
@@ -1421,6 +1463,7 @@ export class VideoComposeDomainService {
         actor,
         "writer",
       );
+      assertWorkflowContext(draft, input.projectId, input.workflowContext);
       const cKey = compositeKey(input.projectId, input.compositionId);
       const comp = draft.compositions[cKey];
       if (!comp) {
@@ -1434,6 +1477,7 @@ export class VideoComposeDomainService {
         );
       }
 
+      this.assertApprovedSubjectBindings(draft, input.projectId, historical.document);
       const nextRevision = comp.headRevision + 1;
       const now = new Date().toISOString();
       const restoredRecord: CompositionRevisionRecord = {
@@ -1524,6 +1568,7 @@ export class VideoComposeDomainService {
       projectId: string;
       proposalId: string;
       operationId: string;
+      workflowContext?: WorkflowContext;
     },
   ): Promise<{
     proposal: ProposalRecord;
@@ -1549,6 +1594,7 @@ export class VideoComposeDomainService {
     }
 
     const patchResult = await this.patchComposition(authActor, {
+      workflowContext: input.workflowContext,
       projectId: input.projectId,
       compositionId: proposal.compositionId,
       baseRevision: proposal.baseRevision,
@@ -1593,6 +1639,7 @@ export class VideoComposeDomainService {
       compositionId: string;
       revision?: number;
       format: "json" | "yaml";
+      targetVersion?: "video-compose/v1" | "video-compose/v2";
     },
   ): Promise<{ bundle: PortableCompositionBundle; serialized: string }> {
     const state = await this.store.readState();
@@ -1614,15 +1661,38 @@ export class VideoComposeDomainService {
       );
     }
 
-    const doc = revRecord.document;
+    const original = revRecord.document;
+    if (input.targetVersion === "video-compose/v1" && original.authoring !== undefined) throw new DomainError("UNREPRESENTABLE_IN_V1", "A v2 reference workflow cannot be silently stripped for v1 export.", { paths: ["authoring"] });
+    const doc: CompositionDocument = { ...original, apiVersion: input.targetVersion ?? original.apiVersion };
+    const referencedMaterials = new Map<string, import("@video-compose/protocol").MaterialRevision>();
     const referencedAssetIds = new Set<string>();
+    const compositionBaselines: NonNullable<PortableCompositionBundle["dependencies"]["compositionBaselines"]> = [];
+    const collectMaterial = (pin: import("@video-compose/protocol").RevisionPin): void => {
+      const key = `${pin.id}@${pin.revision}`;
+      if (referencedMaterials.has(key)) return;
+      const ref = materialRevision(state, input.projectId, pin);
+      if (!ref) throw new DomainError("DEPENDENCY_ERROR", `Missing reference material ${key}`);
+      referencedMaterials.set(key, ref);
+      materialAssetIds(ref.document).forEach(id => referencedAssetIds.add(id));
+      materialPins(ref.document).forEach(collectMaterial);
+      if (ref.document.kind === "storyboard_sequence") {
+        const seq = ref.document;
+        const baseline = state.compositions[compositeKey(input.projectId, seq.compositionId)]?.revisions[seq.compositionRevision]?.document;
+        if (!baseline) throw new DomainError("DEPENDENCY_ERROR", "Storyboard baseline is missing.");
+        if (!compositionBaselines.some(b => b.id === seq.compositionId && b.revision === seq.compositionRevision)) {
+          compositionBaselines.push({ id: seq.compositionId, revision: seq.compositionRevision, document: baseline });
+          baseline.authoring?.materials.forEach(collectMaterial);
+        }
+      }
+    };
+    doc.authoring?.materials.forEach(collectMaterial);
     const referencedSubjects = new Map<string, SubjectSnapshot>();
 
-    for (const track of doc.audioTracks) {
+    for (const track of [doc, ...compositionBaselines.map(b => b.document)].flatMap(d => d.audioTracks)) {
       referencedAssetIds.add(track.asset);
     }
 
-    for (const shot of Object.values(doc.shots)) {
+    for (const shot of [doc, ...compositionBaselines.map(b => b.document)].flatMap(d => Object.values(d.shots))) {
       for (const img of shot.references.images) referencedAssetIds.add(img.asset);
       for (const vid of shot.references.videos) referencedAssetIds.add(vid.asset);
       for (const img of shot.candidates.images) referencedAssetIds.add(img.asset);
@@ -1653,6 +1723,15 @@ export class VideoComposeDomainService {
       }
     }
 
+    for (const ref of referencedMaterials.values()) {
+      const owners = ref.document.kind === "reference_pack" ? ref.document.views.map(v => v.owner) : ref.document.kind === "storyboard_sequence" ? ref.document.panels.flatMap(p => p.entities.map(e => e.subject)) : [];
+      for (const owner of owners) if (owner.kind !== "scene") {
+        const subject = state.subjects[compositeKey(input.projectId, owner.id)]?.revisions[owner.revision];
+        if (!subject) throw new DomainError("DEPENDENCY_ERROR", "Missing material owner subject.");
+        referencedSubjects.set(subjectRevisionKey(owner.id, owner.revision), subject);
+        for (const variant of Object.values(subject.variants)) variant.referencePack.forEach(r => referencedAssetIds.add(r.asset));
+      }
+    }
     const assetsManifest: AssetManifestEntry[] = [];
     for (const assetId of Array.from(referencedAssetIds).sort()) {
       const asset = state.assets[compositeKey(input.projectId, assetId)];
@@ -1677,12 +1756,13 @@ export class VideoComposeDomainService {
     }
 
     const bundle: PortableCompositionBundle = {
-      apiVersion: PROTOCOL_VERSION,
+      apiVersion: doc.apiVersion,
       composition: doc,
       revision: revRecord.revision,
       dependencies: {
         subjects: Array.from(referencedSubjects.values()),
         assets: assetsManifest,
+        ...(doc.apiVersion === "video-compose/v2" ? { materials: Array.from(referencedMaterials.values()), compositionBaselines } : {}),
       },
     };
 
@@ -1696,10 +1776,12 @@ export class VideoComposeDomainService {
     actor: ActorIdentity | null | undefined,
     input: {
       projectId: string;
+      workflowContext?: WorkflowContext;
       payload: string;
       format: "json" | "yaml";
       targetCompositionId?: string;
       operationId?: string;
+      baseRevision?: number;
     },
   ): Promise<CompositionRevisionRecord> {
     return this.store.runInTransaction("importCompositionBundle", (draft) => {
@@ -1710,6 +1792,11 @@ export class VideoComposeDomainService {
         "writer",
       );
 
+      assertWorkflowContext(draft, input.projectId, input.workflowContext);
+      const receiptKey = input.operationId ? canonicalizeJson(["bundle-import", input.projectId, authActor.actorId, input.operationId]) : undefined;
+      const fingerprint = canonicalizeJson({ payload: input.payload, format: input.format, targetCompositionId: input.targetCompositionId ?? null, baseRevision: input.baseRevision ?? null });
+      const receipt = receiptKey ? draft.idempotencyRecords[receiptKey] as { fingerprint: string; result: CompositionRevisionRecord } | undefined : undefined;
+      if (receipt) { if (receipt.fingerprint !== fingerprint) throw new DomainError("VALIDATION_FAILED", "Import operationId was reused with different content."); return receipt.result; }
       const parsed = parseBundleInterchange(input.payload, input.format);
       if (!parsed.ok) {
         throw new DomainError(
@@ -1720,6 +1807,8 @@ export class VideoComposeDomainService {
       }
 
       const bundle = parsed.value;
+      const initialTarget = draft.compositions[compositeKey(input.projectId, input.targetCompositionId ?? bundle.composition.id)];
+      if ((input.baseRevision !== undefined && input.baseRevision !== (initialTarget?.headRevision ?? 0)) || (initialTarget && isStrictProject(draft, input.projectId) && input.baseRevision === undefined)) throw new DomainError("REVISION_CONFLICT", "Import requires the current target baseRevision.", { headRevision: initialTarget?.headRevision ?? 0 });
       const missingAssets: string[] = [];
       for (const assetDep of bundle.dependencies.assets) {
         const existingAsset = draft.assets[compositeKey(input.projectId, assetDep.id)];
@@ -1759,6 +1848,7 @@ export class VideoComposeDomainService {
           draft.subjectChanges[sKey] = [];
         } else {
           const existingRev = existingSubj.revisions[subjSnap.revision];
+          if (existingRev && canonicalizeJson(existingRev) !== canonicalizeJson(subjSnap)) throw new DomainError("IMMUTABILITY_VIOLATION", "Imported subject revision conflicts with existing content.");
           if (!existingRev) {
             existingSubj.revisions[subjSnap.revision] = structuredClone(subjSnap);
             existingSubj.latestRevision = Math.max(
@@ -1775,6 +1865,27 @@ export class VideoComposeDomainService {
         }
       }
 
+      for (const source of bundle.dependencies.materials ?? []) {
+        const imported = { ...structuredClone(source), projectId: input.projectId };
+        const mk = compositeKey(input.projectId, imported.document.id);
+        const record = draft.materials[mk] ?? { id: imported.document.id, projectId: input.projectId, headRevision: 0, revisions: {} };
+        const old = record.revisions[imported.revision];
+        if (old && canonicalizeJson(old) !== canonicalizeJson(imported)) throw new DomainError("IMMUTABILITY_VIOLATION", "Imported reference material conflicts with an existing revision.");
+        record.revisions[imported.revision] = old ?? imported;
+        record.headRevision = Math.max(record.headRevision, imported.revision);
+        draft.materials[mk] = record;
+      }
+      for (const baseline of bundle.dependencies.compositionBaselines ?? []) {
+        const ck = compositeKey(input.projectId, baseline.id);
+        const document = { ...structuredClone(baseline.document), project: input.projectId };
+        const comp = draft.compositions[ck] ?? { id: baseline.id, projectId: input.projectId, title: document.title, headRevision: 0, revisions: {} };
+        const existing = comp.revisions[baseline.revision];
+        if (existing && canonicalizeJson(existing.document) !== canonicalizeJson(document)) throw new DomainError("IMMUTABILITY_VIOLATION", "Storyboard baseline conflicts with an existing composition revision.");
+        comp.revisions[baseline.revision] = existing ?? { compositionId: baseline.id, projectId: input.projectId, revision: baseline.revision, parentRevision: null, actorId: authActor.actorId, actorKind: authActor.actorKind, operationId: input.operationId ?? "baseline-import", createdAt: new Date().toISOString(), message: "Imported pinned storyboard baseline", document };
+        comp.headRevision = Math.max(comp.headRevision, baseline.revision);
+        draft.compositions[ck] = comp;
+        draft.changes[ck] ??= [];
+      }
       const importedDoc: CompositionDocument = {
         ...structuredClone(bundle.composition),
         id: input.targetCompositionId ?? bundle.composition.id,
@@ -1796,6 +1907,7 @@ export class VideoComposeDomainService {
       const cKey = compositeKey(input.projectId, validated.value.id);
       const now = new Date().toISOString();
       const existingComp = draft.compositions[cKey];
+      if (existingComp?.revisions[existingComp.headRevision].document.apiVersion === "video-compose/v2" && validated.value.apiVersion === "video-compose/v1") throw new DomainError("UNREPRESENTABLE_IN_V1", "Import cannot erase v2 authoring dependencies.");
       const nextRev = existingComp ? existingComp.headRevision + 1 : 1;
       const revRecord: CompositionRevisionRecord = {
         compositionId: validated.value.id,
@@ -1825,6 +1937,7 @@ export class VideoComposeDomainService {
         existingComp.title = validated.value.title;
       }
 
+      if (receiptKey) draft.idempotencyRecords[receiptKey] = { fingerprint, result: revRecord };
       return revRecord;
     });
   }

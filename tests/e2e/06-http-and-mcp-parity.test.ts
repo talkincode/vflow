@@ -1,13 +1,14 @@
 import { canonicalizeJson, PROTOCOL_VERSION } from "@video-compose/protocol";
 import { describe, expect, it } from "vitest";
 import { createTestHarness } from "./helpers.ts";
+import { handleMcpJsonRpc } from "@video-compose/api";
 
 describe("E2E 06 — HTTP/MCP 接入 (HTTP REST & Remote MCP Parity)", () => {
   it("Happy Path: REST and MCP tools produce identical canonical results and support idempotent retries", async () => {
-    const { writerClient, agentAClient } = createTestHarness();
+    const { domain, writerClient, agentAClient } = createTestHarness();
 
     // Create project via MCP
-    await writerClient.callMcpTool("project_create", {
+    await writerClient.callMcpTool("project_create", { authoringMode: "legacy",
       id: "mcp-proj",
       name: "MCP Parity Project",
       members: {
@@ -131,13 +132,30 @@ describe("E2E 06 — HTTP/MCP 接入 (HTTP REST & Remote MCP Parity)", () => {
     );
     expect(usage).toHaveLength(1);
     expect(usage[0].shotId).toBe("shot-1");
+
+    // Strict MCP clients reject array-valued structuredContent even when text is valid.
+    for (const name of ["project_list", "composition_list", "asset_search", "subject_list", "subject_usage", "composition_history"]) {
+      const response = await handleMcpJsonRpc(domain, { actorId: "agent-storyboard", actorKind: "agent" }, {
+        jsonrpc: "2.0", id: name, method: "tools/call",
+        params: { name, arguments: { projectId: "mcp-proj", compositionId: "comp-parity", subjectId: "char-mcp" } },
+      });
+      expect(response.error).toBeUndefined();
+      const result = response.result as { content: Array<{ text: string }>; structuredContent?: Record<string, unknown>; isError: boolean };
+      expect(result.isError).toBe(false);
+      const payload = JSON.parse(result.content[0].text);
+      if (Array.isArray(payload)) {
+        expect(result.structuredContent).toBeUndefined();
+      } else {
+        expect(result.structuredContent).toEqual(payload);
+      }
+    }
   });
 
   it("Failure Path, Role Verification & Recovery: blocks anonymous/reader MCP mutations and recovers cleanly on retry after fault", async () => {
     const { domain, writerClient, anonymousClient, agentReaderClient } =
       createTestHarness();
 
-    await writerClient.createProject({
+    await writerClient.createProject({ authoringMode: "legacy",
       id: "mcp-proj",
       name: "MCP Project",
       members: {

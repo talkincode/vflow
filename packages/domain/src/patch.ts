@@ -8,6 +8,7 @@ import {
 
 export function computeOperationPaths(op: TypedOperation): string[] {
   switch (op.op) {
+    case "set_authoring": return ["authoring", "apiVersion"];
     case "upsert_shot": {
       const paths = [`shots.${op.shotId}`];
       if (op.afterShotId !== undefined) {
@@ -36,6 +37,10 @@ export function computeOperationPaths(op: TypedOperation): string[] {
       return [`shots.${op.shotId}`, "sequence"];
     case "attach_shot_candidate":
       return [`shots.${op.shotId}.candidates.${op.mediaKind}.${op.candidate.asset}`];
+    case "detach_shot_candidate":
+      return [`shots.${op.shotId}.candidates.${op.mediaKind}.${op.assetId}`];
+    case "update_shot_candidate":
+      return [`shots.${op.shotId}.candidates.${op.mediaKind}.${op.assetId}`];
     case "select_shot_output":
       return [`shots.${op.shotId}.selected.${op.mediaKind}`];
     case "bind_shot_subject":
@@ -91,6 +96,10 @@ export function applyTypedOperations(
 
   for (const op of operations) {
     switch (op.op) {
+      case "set_authoring":
+        doc.apiVersion = "video-compose/v2";
+        doc.authoring = structuredClone(op.authoring);
+        break;
       case "upsert_shot": {
         doc.shots[op.shotId] = structuredClone(op.shot);
         const existingIdx = doc.sequence.indexOf(op.shotId);
@@ -164,8 +173,52 @@ export function applyTypedOperations(
         if (existingIdx >= 0) {
           list[existingIdx] = structuredClone(op.candidate);
         } else {
+          if (op.mediaKind === "images" && list.length >= 5) {
+            throw new DomainError(
+              "VALIDATION_FAILED",
+              `Shot '${op.shotId}' already has the maximum of 5 candidate images.`,
+            );
+          }
           list.push(structuredClone(op.candidate));
         }
+        break;
+      }
+
+      case "detach_shot_candidate": {
+        const target = doc.shots[op.shotId];
+        if (!target) {
+          throw new DomainError("NOT_FOUND", `Shot '${op.shotId}' does not exist.`);
+        }
+        const list = target.candidates[op.mediaKind];
+        const existingIdx = list.findIndex((c) => c.asset === op.assetId);
+        if (existingIdx !== -1) {
+          list.splice(existingIdx, 1);
+        }
+        if (op.mediaKind === "videos" && target.selected.video === op.assetId) {
+          target.selected.video = null;
+        }
+        if (op.mediaKind === "audios" && target.selected.audio === op.assetId) {
+          target.selected.audio = null;
+        }
+        break;
+      }
+
+      case "update_shot_candidate": {
+        const target = doc.shots[op.shotId];
+        if (!target) {
+          throw new DomainError("NOT_FOUND", `Shot '${op.shotId}' does not exist.`);
+        }
+        const list = target.candidates[op.mediaKind];
+        const existing = list.find((c) => c.asset === op.assetId);
+        if (!existing) {
+          throw new DomainError(
+            "NOT_FOUND",
+            `Candidate asset '${op.assetId}' not found in shot '${op.shotId}' ${op.mediaKind}.`,
+          );
+        }
+        if (op.candidate.role !== undefined) existing.role = op.candidate.role;
+        if (op.candidate.actor !== undefined) existing.actor = op.candidate.actor;
+        if (op.candidate.notes !== undefined) existing.notes = op.candidate.notes;
         break;
       }
 

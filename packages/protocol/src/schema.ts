@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION } from "./types.ts";
+import { PROTOCOL_VERSION, REFERENCE_PROTOCOL_VERSION } from "./types.ts";
 
 export const COMPOSITION_JSON_SCHEMA = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -58,7 +58,9 @@ export const COMPOSITION_JSON_SCHEMA = {
               required: ["shotId", "kind"],
               properties: {
                 shotId: { type: "string", minLength: 1 },
-                kind: { enum: ["continuity", "last_frame", "narrative", "reference"] },
+                kind: {
+                  enum: ["continuity", "last_frame", "narrative", "reference"],
+                },
                 notes: { type: "string" },
               },
               additionalProperties: false,
@@ -123,7 +125,7 @@ export const COMPOSITION_JSON_SCHEMA = {
             type: "object",
             required: ["images", "videos", "audios"],
             properties: {
-              images: { type: "array" },
+              images: { type: "array", maxItems: 5 },
               videos: { type: "array" },
               audios: { type: "array" },
             },
@@ -146,6 +148,36 @@ export const COMPOSITION_JSON_SCHEMA = {
   },
 } as const;
 
+export const COMPOSITION_V2_JSON_SCHEMA = {
+  ...COMPOSITION_JSON_SCHEMA,
+  $id: "https://video-compose.talkincode.net/schemas/v2/composition.json",
+  title: "VideoComposeCompositionV2",
+  properties: {
+    ...COMPOSITION_JSON_SCHEMA.properties,
+    apiVersion: { const: REFERENCE_PROTOCOL_VERSION },
+    authoring: {
+      type: "object",
+      required: ["policyVersion", "materials"],
+      properties: {
+        policyVersion: { const: "reference-authoring/1" },
+        materials: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["id", "revision"],
+            properties: {
+              id: { type: "string", minLength: 1 },
+              revision: { type: "integer", minimum: 1 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+} as const;
+
 export const SUBJECT_JSON_SCHEMA = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://video-compose.talkincode.net/schemas/v1/subject.json",
@@ -156,7 +188,15 @@ export const SUBJECT_JSON_SCHEMA = {
     apiVersion: { const: PROTOCOL_VERSION },
     subject: {
       type: "object",
-      required: ["id", "kind", "revision", "status", "name", "definition", "variants"],
+      required: [
+        "id",
+        "kind",
+        "revision",
+        "status",
+        "name",
+        "definition",
+        "variants",
+      ],
       properties: {
         id: { type: "string", minLength: 1 },
         kind: { enum: ["character", "prop"] },

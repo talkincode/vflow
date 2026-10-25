@@ -14,7 +14,7 @@ describe("E2E 07 — 轻量工作台 (Lightweight Three-View React Workbench)", 
   it("Happy Path: renders Grid, Manifest List (with global BGM), and Dependency Topology consistently, edits shot description, and undoes revision without data loss", async () => {
     const { writerClient } = createTestHarness();
 
-    await writerClient.createProject({
+    await writerClient.createProject({ authoringMode: "legacy",
       id: "demo",
       name: "Demo Workbench Project",
       members: {
@@ -162,7 +162,7 @@ describe("E2E 07 — 轻量工作台 (Lightweight Three-View React Workbench)", 
   it("Failure Path and Role Verification: read-only inspector disables edits and a direct API bypass leaves the authoritative state unchanged", async () => {
     const { writerClient, readerClient } = createTestHarness();
 
-    await writerClient.createProject({
+    await writerClient.createProject({ authoringMode: "legacy",
       id: "demo",
       name: "Demo",
       members: { "bob-reader@talkincode.net": "reader" },

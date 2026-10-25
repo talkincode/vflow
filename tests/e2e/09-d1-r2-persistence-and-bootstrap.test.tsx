@@ -13,6 +13,7 @@ import type {
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Workbench } from "../../apps/web/src/Workbench.tsx";
+import { seedReferences } from "./reference-fixture.ts";
 import { projectComposition } from "./project-fixture.ts";
 import {
   HUMAN_READER_HEADERS,
@@ -35,6 +36,7 @@ function createSqliteD1Adapter(): {
   );
   const schemaSql = fs.readFileSync(migrationPath, "utf8");
   sqlite.exec(schemaSql);
+  sqlite.exec(fs.readFileSync(path.resolve(import.meta.dirname, "../../apps/api/migrations/0003_reference_authoring.sql"), "utf8"));
 
   const createStatement = (
     query: string,
@@ -242,8 +244,8 @@ describe("E2E 09 — Cloudflare D1/R2 持久化绑定、Static Assets 与空库�
       members: { "bob-reader@talkincode.net": "reader" as const },
       operationId: "d1-project-once",
     };
-    const project = await writerClient.createProject(projectCreation);
-    expect(await writerClient.createProject(projectCreation)).toEqual(project);
+    const project = await writerClient.createProject({ ...projectCreation, authoringMode: "legacy" });
+    expect(await writerClient.createProject({ ...projectCreation, authoringMode: "legacy" })).toEqual(project);
     const compositionCreation = {
       projectId: "d1-proj", operationId: "d1-composition-once",
       document: projectComposition("d1-proj", "first", "第一条", "开场"),
@@ -282,4 +284,21 @@ describe("E2E 09 — Cloudflare D1/R2 持久化绑定、Static Assets 与空库�
     const assetsInD1 = await readerClient.listAssets("d1-proj");
     expect(assetsInD1).toHaveLength(0);
   });
+  it("persists strict reference revisions, context and exact-input evidence across fresh Worker isolates", async () => {
+    const { d1, sqlite } = createSqliteD1Adapter();
+    const env: WorkerEnv = { DB: d1, MEDIA_BUCKET: createR2BucketAdapter() };
+    const client = () => new VideoComposeClient({ baseUrl: "https://video-compose.talkincode.net", headers: HUMAN_WRITER_HEADERS, fetchFn: (input, init) => worker.fetch(new Request(String(input), init), env) });
+    const writer = client();
+    const fixture = await seedReferences(writer);
+    const fresh = client();
+    await fresh.getAuthoringWorkflow("reference-test");
+    expect((await fresh.getAuthoringDocument("reference-test", "suwei-face", 3)).status).toBe("approved");
+    const packet = (await fresh.prepareGenerationInputs("reference-test", fixture.request)).packet!;
+    const evidence = await fresh.recordGenerationEvidence({ projectId: "reference-test", id: "persisted", operationId: "persist-evidence", packet, actualInputs: packet.inputs.map(({ asset, sha256, role }) => ({ asset, sha256, role })), outputs: ["panel-one"], method: "agent_reported", evidence: "Synthetic external report persisted across isolated calls." });
+    expect(evidence.matchesPlan).toBe(true);
+    expect((await client().listGenerationEvidence("reference-test"))[0]).toEqual(evidence);
+    expect(sqlite.prepare("SELECT COUNT(*) AS count FROM reference_documents").get()?.count).toBe(6);
+    sqlite.close();
+  });
+
 });

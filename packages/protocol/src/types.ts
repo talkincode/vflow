@@ -1,5 +1,6 @@
 export const PROTOCOL_VERSION = "video-compose/v1" as const;
-export type ProtocolVersion = typeof PROTOCOL_VERSION;
+export const REFERENCE_PROTOCOL_VERSION = "video-compose/v2" as const;
+export type ProtocolVersion = typeof PROTOCOL_VERSION | typeof REFERENCE_PROTOCOL_VERSION;
 
 export type ProjectRole = "reader" | "writer";
 export type ActorKind = "human" | "agent";
@@ -134,6 +135,7 @@ export interface CompositionDocument {
   audioTracks: AudioTrackDefinition[];
   sequence: string[];
   shots: Record<string, ShotDefinition>;
+  authoring?: import("./authoring.ts").CompositionAuthoring;
   extensions?: Record<string, unknown>;
   [key: `x-${string}`]: unknown;
 }
@@ -156,6 +158,8 @@ export interface PortableCompositionBundle {
   dependencies: {
     subjects: SubjectSnapshot[];
     assets: AssetManifestEntry[];
+    materials?: import("./authoring.ts").MaterialRevision[];
+    compositionBaselines?: Array<{ id: string; revision: number; document: CompositionDocument }>;
   };
 }
 
@@ -175,6 +179,7 @@ export type ProtocolErrorCode =
   | "MISSING_SUBJECT_REVISION"
   | "MISSING_SUBJECT_VARIANT"
   | "INVALID_SUBJECT"
+  | "INVALID_CANDIDATE_LIST"
   | "PARSE_ERROR";
 
 export interface ProtocolValidationError {
@@ -188,6 +193,7 @@ export type ProtocolValidationResult<T> =
   | { ok: false; errors: ProtocolValidationError[] };
 
 export interface ValidationContext {
+  availableMaterials?: ReadonlyMap<string, import("./authoring.ts").MaterialRevision>;
   availableAssets?: ReadonlySet<string>;
   availableSubjects?: ReadonlyMap<string, SubjectSnapshot>;
 }

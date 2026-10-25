@@ -61,9 +61,37 @@
 - Pre-release Worker version: `d63ba2e3-3c60-4ea1-8299-e77af9a026e9` (source commit `6d3ebe8569e4e534bce1223a98502d8fae386dbc`). If rollback is needed, verify that this is the intended baseline and run `npx wrangler rollback d63ba2e3-3c60-4ea1-8299-e77af9a026e9 --config apps/api/wrangler.jsonc`. Stored projects/compositions remain in D1; rollback only removes the new browser entry and creation-retry behavior.
 - Before reporting success, verify the exact commit's CI, the actual Worker version, anonymous Access redirects for the new paths, the logged-in project library, project overview, and a composition opened by its direct URL. Save production screenshots outside the public repository.
 
+## MCP OAuth 2.1 release (2026-10-24)
+
+- **Worker Version ID**: `c33a40cd-9d62-4cdb-9dd2-58fbefa5679d` (prior OAuth base `2a05f4ac-65c0-4514-9c8b-b55a7ed794e2`)
+- **D1 Migration**: Applied `0002_mcp_oauth.sql` to `video-compose-db` (`028d0760-9c64-4f4d-876e-8e6b33236acc`), creating `mcp_clients`, `mcp_grants`, `mcp_tokens`.
+- **Tool Schema Compliance**: Added standard JSON Schema `inputSchema` for all 26 tools in `MCP_TOOLS_MANIFEST` and handled `notifications/initialized`, `ping`, and dynamic `protocolVersion` negotiation for full OpenAI/ChatGPT MCP compatibility.
+- **Cloudflare Access Application**: Added machine bypass application `Video Compose MCP machine` (App ID `23185069-e6c1-4de2-a816-fcea36215257`, AUD `22b0af63bc95085c9f3acccf5cbb5122f410e837e2d702f6947a0892b3b5cd50`).
+  - Destinations bypassed for automated MCP clients: `/mcp`, `/oauth/token`, `/oauth/register`, `/oauth/revoke`, `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp`, `/.well-known/oauth-authorization-server`.
+  - Human consent endpoint (`/oauth/authorize`) remains strictly protected by root Access SSO application (`72992495-1fba-419e-83e7-d825db14f557`).
+- **Live Verification**:
+  - `GET https://video-compose.talkincode.net/.well-known/oauth-protected-resource` -> `200 OK`
+  - `GET https://video-compose.talkincode.net/.well-known/oauth-authorization-server` -> `200 OK`
+  - `POST https://video-compose.talkincode.net/mcp` unauthenticated -> `401 Unauthorized` with `WWW-Authenticate: Bearer realm="video-compose", resource_metadata="https://video-compose.talkincode.net/.well-known/oauth-protected-resource/mcp"`
+  - `POST https://video-compose.talkincode.net/oauth/register` -> `201 Created`
+  - `POST https://video-compose.talkincode.net/mcp` `tools/list` -> `200 OK` (26 tools returned, each having compliant `inputSchema`)
+  - `GET https://video-compose.talkincode.net/oauth/authorize` -> `302 Found` to Zero Trust SSO login
+
+## MCP list compatibility and reference preview hotfix (2026-10-25)
+
+- Worker version `118ca0e9-b626-42f8-accf-cb99958b510e` replaces `5f68d123-2909-4cda-8d6c-0eaedaa4abef`. Deployed with `--keep-vars`, without migrations or asset rewrites. Existing OAuth and five-image candidate changes were already present in the production baseline; existing uncommitted work was preserved. This hotfix was deployed from the working tree; no commit, push, or GitHub CI run was performed in this operation.
+- Array results remain serialized in MCP text content and no longer populate object-only `structuredContent`; the local client reads text when structured content is absent. Production connector calls to `project_list`, `subject_list` and `asset_search` now pass strict response validation.
+- Compact image previews, including character/prop reference cards, expose an authorized same-origin original-image link. Local acceptance: typecheck, lint, 41 integration tests and 15 Chromium tests passed, including opening a subject reference in a new tab and checking image decoding.
+- Authenticated production verification: all three uploaded realistic reference boards decoded at their original dimensions in the asset library, all eight subjects displayed their new reference packs, and the Su Wei full-size original opened successfully. Anonymous project API access still redirects to Cloudflare Access (`302`).
+- The existing MV compositions were compared before/after: `old-bridge-main-177s` revision 6 still has 31 shots and 5316 frames; `old-bridge-broll-library` revision 3 still has 32 shots. Both composition documents were unchanged. New subject reference revisions remain candidates; historical approved revisions are preserved.
 ## Official references
+
 - [Cloudflare Workers Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)
 - [Cloudflare Access for Workers](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)
 - [Workers Builds / GitHub integration](https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/github-integration/)
 - [GitHub Actions + Wrangler](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/)
 - [Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/)
+
+## Reference authoring migration (local implementation, not a deployment record)
+
+Apply `0003_reference_authoring.sql` along with any earlier unapplied migrations before releasing code that reads reference_documents/reference_evidence. The migration is additive and does not rewrite existing projects; absent policy means legacy. Back up D1 before migration and retain new tables on rollback. Never let an old writer drop v2 authoring dependencies; close old write ingress before rolling back, and use a compatible repair build for v2 data. See [reference authoring compatibility/rollback](reference-authoring.md#v1v2d1-迁移与回滚). Local passing tests do not establish a production rollout or authenticated live acceptance.
