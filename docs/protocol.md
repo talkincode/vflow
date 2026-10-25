@@ -87,3 +87,11 @@ A subject is semantic identity rather than a media file. For details on revision
 
 ## Compatibility policy
 No silent reinterpretation of existing fields. Additive optional fields under v1 are allowed when old clients can safely ignore them; breaking semantic changes require a new `apiVersion` and explicit migration. Schema fixtures and golden tests are mandatory before declaring v1 stable.
+
+## v2 reference dependency contract
+
+`COMPOSITION_JSON_SCHEMA` remains v1. `COMPOSITION_V2_JSON_SCHEMA` declares `video-compose/v2` and optional `authoring: {policyVersion, materials: [{id, revision}]}`. `set_authoring` upgrades explicitly, preserving sequence, shot definitions, durations, Subject bindings and selected outputs.
+
+Reference documents use `video-compose/reference-workflow/v1`: discriminated policy, scene, reference_pack and storyboard_sequence schemas exported from `authoring.ts`. Scene identity, environment variant, per-view owner/purpose, crop provenance, text policy and visual review are typed fields, not provider metadata or asset tags. Prompts remain separate from clean image pixels.
+
+V2 bundle dependencies include exact material revisions and compositionBaselines required by sequences, alongside subjects and assets. V1 readers reject v2; lossy conversion is refused with UNREPRESENTABLE_IN_V1. All necessary assets must already exist with matching hashes on import; missing/cyclic/conflicting dependencies fail atomically. Rules, complete workflow, schema resources, input/evidence contracts and rollback are specified in [reference-authoring.md](reference-authoring.md).

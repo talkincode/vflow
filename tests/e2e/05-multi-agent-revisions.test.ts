@@ -6,7 +6,7 @@ describe("E2E 05 — 多 Agent 修订与审阅 (Multi-Agent Revisions & Review P
   it("Happy Path: merges disjoint concurrent Agent patches from stale baseRevision, processes review proposals, and restores historical revisions", async () => {
     const { writerClient, agentAClient, agentBClient } = createTestHarness();
 
-    await writerClient.createProject({
+    await writerClient.createProject({ authoringMode: "legacy",
       id: "demo",
       name: "Demo",
       members: {
@@ -166,7 +166,7 @@ describe("E2E 05 — 多 Agent 修订与审阅 (Multi-Agent Revisions & Review P
     const { writerClient, agentAClient, agentBClient, agentReaderClient } =
       createTestHarness();
 
-    await writerClient.createProject({
+    await writerClient.createProject({ authoringMode: "legacy",
       id: "demo",
       name: "Demo",
       members: {

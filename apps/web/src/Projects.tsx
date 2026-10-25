@@ -514,6 +514,7 @@ function CreateDialog({
             : format === "square"
               ? [1080, 1080]
               : [1920, 1080];
+        await client.getAuthoringWorkflow(projectId);
         await client.createComposition({
           projectId,
           operationId: operationId.current,

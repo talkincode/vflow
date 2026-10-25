@@ -6,7 +6,7 @@ describe("E2E 01 — 项目与编排管理 (Project & Composition Management)", 
   it("Happy Path: writer creates project, registers shared asset, and creates multiple compositions", async () => {
     const { writerClient, readerClient } = createTestHarness();
 
-    const project = await writerClient.createProject({
+    const project = await writerClient.createProject({ authoringMode: "legacy",
       id: "demo",
       name: "Demo Video Project",
       members: {
@@ -104,7 +104,7 @@ describe("E2E 01 — 项目与编排管理 (Project & Composition Management)", 
     const { writerClient, readerClient, outsiderClient, anonymousClient } =
       createTestHarness();
 
-    await writerClient.createProject({
+    await writerClient.createProject({ authoringMode: "legacy",
       id: "demo",
       name: "Demo",
       members: { "bob-reader@talkincode.net": "reader" },
@@ -140,7 +140,7 @@ describe("E2E 01 — 项目与编排管理 (Project & Composition Management)", 
   it("Failure Path & Rollback: failed composition creation or commit fault leaves no partial state", async () => {
     const { domain, writerClient } = createTestHarness();
 
-    await writerClient.createProject({ id: "demo", name: "Demo" });
+    await writerClient.createProject({ authoringMode: "legacy", id: "demo", name: "Demo" });
 
     // 1. Validation failure (referencing non-existent sequence shot)
     await expect(

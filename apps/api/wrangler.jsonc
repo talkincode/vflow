@@ -1,10 +1,14 @@
 {
-  // Cloudflare Worker configuration for Video Compose (verified hostname: video-compose.talkincode.net)
+  // Cloudflare Worker configuration for Video Compose (canonical hostname: vflow.talkincode.net; legacy alias retained)
   "name": "video-compose",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "workers_dev": false,
   "routes": [
+    {
+      "pattern": "vflow.talkincode.net",
+      "custom_domain": true
+    },
     {
       "pattern": "video-compose.talkincode.net",
       "custom_domain": true
@@ -14,7 +18,7 @@
     "directory": "../web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/v1/*", "/mcp"]
+    "run_worker_first": ["/v1/*", "/mcp", "/oauth/*", "/.well-known/*"]
   },
   "d1_databases": [
     {

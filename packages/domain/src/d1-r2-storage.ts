@@ -138,6 +138,8 @@ export class D1TransactionalStore implements DomainStore {
       changesRes,
       proposalsRes,
       idemRes,
+      referenceDocsRes,
+      referenceEvidenceRes,
     ] = await Promise.all([
       this.db.prepare("SELECT version FROM store_meta WHERE id = 1").all<{ version: number }>(),
       this.db
@@ -295,6 +297,8 @@ export class D1TransactionalStore implements DomainStore {
       this.db
         .prepare("SELECT idem_key, result_json FROM idempotency_records")
         .all<{ idem_key: string; result_json: string }>(),
+      this.db.prepare("SELECT project_id, id, record_json FROM reference_documents").all<{ project_id: string; id: string; record_json: string }>(),
+      this.db.prepare("SELECT project_id, id, record_json FROM reference_evidence").all<{ project_id: string; id: string; record_json: string }>(),
     ]);
 
     const version = metaRes.results[0]?.version ?? 0;
@@ -478,6 +482,8 @@ export class D1TransactionalStore implements DomainStore {
       state.idempotencyRecords[idem.idem_key] = JSON.parse(idem.result_json);
     }
 
+    for (const row of referenceDocsRes.results) state.materials[compositeKey(row.project_id, row.id)] = JSON.parse(row.record_json);
+    for (const row of referenceEvidenceRes.results) state.generationEvidence[compositeKey(row.project_id, row.id)] = JSON.parse(row.record_json);
     return { version, state };
   }
 
@@ -742,6 +748,12 @@ export class D1TransactionalStore implements DomainStore {
       );
     }
 
+    for (const record of Object.values(draft.materials)) {
+      stmts.push(this.db.prepare("INSERT OR REPLACE INTO reference_documents (project_id, id, record_json) VALUES (?, ?, ?)").bind(record.projectId, record.id, JSON.stringify(record)));
+    }
+    for (const record of Object.values(draft.generationEvidence)) {
+      stmts.push(this.db.prepare("INSERT OR REPLACE INTO reference_evidence (project_id, id, record_json) VALUES (?, ?, ?)").bind(record.projectId, record.id, JSON.stringify(record)));
+    }
     const batchResults = await this.db.batch(stmts);
     const casChanges = batchResults[0]?.meta?.changes;
     if (casChanges !== undefined && casChanges === 0) {

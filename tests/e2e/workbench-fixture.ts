@@ -6,7 +6,7 @@ export async function seedWorkbench(
   client: VideoComposeClient,
   count = 3,
 ): Promise<void> {
-  await client.createProject({
+  await client.createProject({ authoringMode: "legacy",
     id: "demo",
     name: "工作台验收",
     members: { "bob-reader@talkincode.net": "reader" },

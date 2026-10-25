@@ -6,7 +6,7 @@ describe("E2E 08 — JSON/YAML 交换 (JSON/YAML Portable Interchange)", () => {
   it("Happy Path: round-trips composition bundle (with subjects, assets, audioTracks, dependsOn, candidates) across YAML and JSON without altering semantics", async () => {
     const { writerClient, readerClient } = createTestHarness();
 
-    await writerClient.createProject({
+    await writerClient.createProject({ authoringMode: "legacy",
       id: "source-proj",
       name: "Source Project",
       members: { "bob-reader@talkincode.net": "reader" },
@@ -107,7 +107,7 @@ describe("E2E 08 — JSON/YAML 交换 (JSON/YAML Portable Interchange)", () => {
     );
 
     // Import YAML bundle into a second project that has the required immutable assets registered
-    await writerClient.createProject({
+    await writerClient.createProject({ authoringMode: "legacy",
       id: "target-proj",
       name: "Target Project",
     });
@@ -153,7 +153,7 @@ describe("E2E 08 — JSON/YAML 交换 (JSON/YAML Portable Interchange)", () => {
   it("Failure Path, Role Verification & Rollback: rejects corrupted YAML/JSON, blocks reader import, rejects missing asset dependencies, and preserves existing data", async () => {
     const { writerClient, readerClient } = createTestHarness();
 
-    await writerClient.createProject({
+    await writerClient.createProject({ authoringMode: "legacy",
       id: "demo",
       name: "Demo",
       members: { "bob-reader@talkincode.net": "reader" },

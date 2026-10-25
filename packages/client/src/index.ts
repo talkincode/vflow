@@ -15,6 +15,7 @@ import {
   type TypedOperation,
 } from "@video-compose/domain";
 import type {
+  WorkflowContext,
   CompositionDocument,
   PortableCompositionBundle,
   ProjectRole,
@@ -45,6 +46,7 @@ export class VideoComposeClient {
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => Promise<Response>;
+  private readonly workflowContexts = new Map<string, WorkflowContext>();
   private readonly defaultHeaders: Record<string, string>;
 
   constructor(options: VideoComposeClientOptions = {}) {
@@ -70,6 +72,21 @@ export class VideoComposeClient {
     path: string,
     init: RequestInit = {},
   ): Promise<T> {
+    const projectMatch = /^\/v1\/projects\/([^/]+)\//.exec(path);
+    const context =
+      projectMatch &&
+      this.workflowContexts.get(decodeURIComponent(projectMatch[1]));
+    if (
+      context &&
+      typeof init.body === "string" &&
+      ["POST", "PATCH", "PUT"].includes(init.method ?? "")
+    ) {
+      const body = JSON.parse(init.body);
+      init = {
+        ...init,
+        body: JSON.stringify({ workflowContext: context, ...body }),
+      };
+    }
     const res = await this.fetchFn(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
@@ -109,7 +126,10 @@ export class VideoComposeClient {
       }),
     });
     const rpc = (await res.json()) as {
-      result?: { structuredContent?: T };
+      result?: {
+        structuredContent?: T;
+        content?: Array<{ type: string; text?: string }>;
+      };
       error?: {
         code: number;
         message: string;
@@ -123,7 +143,115 @@ export class VideoComposeClient {
           : "INTERNAL_ERROR")) as DomainErrorCode;
       throw new DomainError(domainCode, rpc.error.message, rpc.error.data);
     }
-    return rpc.result?.structuredContent as T;
+    if (rpc.result?.structuredContent !== undefined) {
+      return rpc.result.structuredContent;
+    }
+    const text = rpc.result?.content?.find(
+      (item) => item.type === "text",
+    )?.text;
+    if (text !== undefined) return JSON.parse(text) as T;
+    throw new DomainError(
+      "INTERNAL_ERROR",
+      "MCP result contains no readable content.",
+    );
+  }
+
+  async getAuthoringWorkflow(projectId: string) {
+    const workflow = await this.requestJson<
+      Awaited<
+        ReturnType<
+          import("@video-compose/domain").ReferenceAuthoringService["workflow"]
+        >
+      >
+    >(`/v1/projects/${encodeURIComponent(projectId)}/authoring/workflow`);
+    this.workflowContexts.set(projectId, workflow.workflowContext);
+    return workflow;
+  }
+  async getAuthoringImpact(projectId: string, id: string, revision: number) {
+    return this.requestJson<
+      Awaited<
+        ReturnType<
+          import("@video-compose/domain").ReferenceAuthoringService["impact"]
+        >
+      >
+    >(
+      `/v1/projects/${encodeURIComponent(projectId)}/authoring/impact/${encodeURIComponent(id)}/${revision}`,
+    );
+  }
+  async listAuthoringDocuments(projectId: string) {
+    return this.requestJson<import("@video-compose/protocol").MaterialRecord[]>(
+      `/v1/projects/${encodeURIComponent(projectId)}/authoring/documents`,
+    );
+  }
+  async getAuthoringDocument(projectId: string, id: string, revision?: number) {
+    return this.requestJson<import("@video-compose/protocol").MaterialRevision>(
+      `/v1/projects/${encodeURIComponent(projectId)}/authoring/documents/${encodeURIComponent(id)}${revision === undefined ? "" : `?revision=${revision}`}`,
+    );
+  }
+  async putAuthoringDocument(
+    input: Parameters<
+      import("@video-compose/domain").ReferenceAuthoringService["put"]
+    >[1],
+  ) {
+    return this.requestJson<import("@video-compose/protocol").MaterialRevision>(
+      `/v1/projects/${encodeURIComponent(input.projectId)}/authoring/documents`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+  async reviewAuthoringDocument(
+    input: Parameters<
+      import("@video-compose/domain").ReferenceAuthoringService["review"]
+    >[1],
+  ) {
+    return this.requestJson<import("@video-compose/protocol").MaterialRevision>(
+      `/v1/projects/${encodeURIComponent(input.projectId)}/authoring/documents/${encodeURIComponent(input.id)}/review`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+  async approveAuthoringDocument(
+    input: Parameters<
+      import("@video-compose/domain").ReferenceAuthoringService["approve"]
+    >[1],
+  ) {
+    return this.requestJson<import("@video-compose/protocol").MaterialRevision>(
+      `/v1/projects/${encodeURIComponent(input.projectId)}/authoring/documents/${encodeURIComponent(input.id)}/approve`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+  async validateAuthoringDocument(projectId: string, document: unknown) {
+    return this.requestJson<
+      import("@video-compose/protocol").AuthoringValidation
+    >(`/v1/projects/${encodeURIComponent(projectId)}/authoring/validate`, {
+      method: "POST",
+      body: JSON.stringify({ document }),
+    });
+  }
+  async prepareGenerationInputs(projectId: string, request: unknown) {
+    return this.requestJson<{
+      ready: boolean;
+      diagnostics: import("@video-compose/protocol").AuthoringDiagnostic[];
+      packet?: import("@video-compose/protocol").GenerationInputPacket;
+    }>(`/v1/projects/${encodeURIComponent(projectId)}/authoring/prepare`, {
+      method: "POST",
+      body: JSON.stringify({ request }),
+    });
+  }
+  async recordGenerationEvidence(
+    input: Parameters<
+      import("@video-compose/domain").ReferenceAuthoringService["recordEvidence"]
+    >[1],
+  ) {
+    return this.requestJson<
+      import("@video-compose/protocol").GenerationEvidence
+    >(
+      `/v1/projects/${encodeURIComponent(input.projectId)}/authoring/evidence`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+  async listGenerationEvidence(projectId: string) {
+    return this.requestJson<
+      import("@video-compose/protocol").GenerationEvidence[]
+    >(`/v1/projects/${encodeURIComponent(projectId)}/authoring/evidence`);
   }
 
   async createProject(input: {
@@ -132,6 +260,7 @@ export class VideoComposeClient {
     description?: string;
     members?: Record<string, ProjectRole>;
     operationId?: string;
+    authoringMode?: "strict" | "legacy";
   }): Promise<ProjectRecord> {
     const data = await this.requestJson<{ project: ProjectRecord }>(
       "/v1/projects",
@@ -186,7 +315,8 @@ export class VideoComposeClient {
     height?: number;
     durationFrames?: number;
   }): Promise<AssetRecord> {
-    const sha256 = input.expectedSha256 ?? (await computeSha256Hex(input.bytes));
+    const sha256 =
+      input.expectedSha256 ?? (await computeSha256Hex(input.bytes));
     const prep = await this.requestJson<{
       session: { sessionId: string };
     }>(`/v1/projects/${encodeURIComponent(input.projectId)}/assets/prepare`, {
@@ -245,6 +375,7 @@ export class VideoComposeClient {
 
   async createSubject(input: {
     projectId: string;
+    workflowContext?: WorkflowContext;
     id: string;
     kind: SubjectKind;
     name: string;
@@ -265,6 +396,7 @@ export class VideoComposeClient {
 
   async patchSubject(input: {
     projectId: string;
+    workflowContext?: WorkflowContext;
     subjectId: string;
     baseRevision: number;
     operationId: string;
@@ -295,6 +427,7 @@ export class VideoComposeClient {
 
   async approveSubjectRevision(input: {
     projectId: string;
+    workflowContext?: WorkflowContext;
     subjectId: string;
     revision: number;
     operationId: string;
@@ -315,7 +448,10 @@ export class VideoComposeClient {
     revision?: number,
   ): Promise<{ subject: SubjectRecord; snapshot: SubjectSnapshot }> {
     const q = revision !== undefined ? `?revision=${revision}` : "";
-    return this.requestJson<{ subject: SubjectRecord; snapshot: SubjectSnapshot }>(
+    return this.requestJson<{
+      subject: SubjectRecord;
+      snapshot: SubjectSnapshot;
+    }>(
       `/v1/projects/${encodeURIComponent(projectId)}/subjects/${encodeURIComponent(subjectId)}${q}`,
     );
   }
@@ -333,6 +469,7 @@ export class VideoComposeClient {
 
   async createComposition(input: {
     projectId: string;
+    workflowContext?: WorkflowContext;
     document: CompositionDocument;
     operationId?: string;
   }): Promise<CompositionRevisionRecord> {
@@ -371,6 +508,7 @@ export class VideoComposeClient {
 
   async patchComposition(input: {
     projectId: string;
+    workflowContext?: WorkflowContext;
     compositionId: string;
     baseRevision: number;
     operationId: string;
@@ -403,6 +541,7 @@ export class VideoComposeClient {
 
   async restoreCompositionRevision(input: {
     projectId: string;
+    workflowContext?: WorkflowContext;
     compositionId: string;
     targetRevision: number;
     operationId: string;
@@ -424,8 +563,10 @@ export class VideoComposeClient {
     compositionId: string;
     revision?: number;
     format: "json" | "yaml";
+    targetVersion?: "video-compose/v1" | "video-compose/v2";
   }): Promise<{ bundle: PortableCompositionBundle; serialized: string }> {
     const params = new URLSearchParams({ format: input.format });
+    if (input.targetVersion) params.set("targetVersion", input.targetVersion);
     if (input.revision !== undefined) {
       params.set("revision", String(input.revision));
     }
@@ -436,10 +577,12 @@ export class VideoComposeClient {
 
   async importCompositionBundle(input: {
     projectId: string;
+    workflowContext?: WorkflowContext;
     payload: string;
     format: "json" | "yaml";
     targetCompositionId?: string;
     operationId?: string;
+    baseRevision?: number;
   }): Promise<CompositionRevisionRecord> {
     const data = await this.requestJson<{
       revisionRecord: CompositionRevisionRecord;
@@ -473,6 +616,7 @@ export class VideoComposeClient {
 
   async approveProposal(input: {
     projectId: string;
+    workflowContext?: WorkflowContext;
     proposalId: string;
     operationId: string;
   }): Promise<{

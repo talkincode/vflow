@@ -7,7 +7,7 @@ describe("E2E 03 — 不可变资产管理 (Immutable Asset Management)", () => 
   it("Happy Path: uploads verified asset, reuses across shots and audioTracks, and prevents deleting referenced assets", async () => {
     const { writerClient, readerClient } = createTestHarness();
 
-    await writerClient.createProject({
+    await writerClient.createProject({ authoringMode: "legacy",
       id: "demo",
       name: "Demo",
       members: { "bob-reader@talkincode.net": "reader" },
@@ -80,7 +80,7 @@ describe("E2E 03 — 不可变资产管理 (Immutable Asset Management)", () => 
   it("Failure Path, Role Verification & Rollback: rejects hash mismatch, blocks overwriting existing assetId, blocks reader upload, and cleans up failed upload", async () => {
     const { domain, writerClient, readerClient } = createTestHarness();
 
-    await writerClient.createProject({
+    await writerClient.createProject({ authoringMode: "legacy",
       id: "demo",
       name: "Demo",
       members: { "bob-reader@talkincode.net": "reader" },

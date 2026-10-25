@@ -7,7 +7,7 @@ Build a portable, versioned declarative video composition protocol and a lightwe
 - Protocol and domain semantics are the source of truth; UI and MCP are adapters.
 - No image/video generation runtime, no ComfyUI-like execution graph, no built-in media rendering, no publishing integrations.
 - Deployment MUST target Cloudflare Workers; do not introduce PM2/systemd/VPS runtime, fabricated hostnames, example.com domains or hardcoded ports as deployed facts.
-- Production hostname MUST be a `talkincode.net` subdomain managed by Cloudflare; planned default `video-compose.talkincode.net` until actual DNS/Worker routing is verified.
+- Production hostname MUST be a `talkincode.net` subdomain managed by Cloudflare; canonical target `vflow.talkincode.net`; retain `video-compose.talkincode.net` as a compatibility alias. Verify actual DNS/Worker routing before claiming it is live.
 - Browser UI, REST API and MCP MUST be protected with Cloudflare Access (Zero Trust SSO / service authentication as appropriate); Worker MUST still enforce per-project authorization.
 - GitHub-to-Workers deployment MUST be supported, preferring native Workers Builds GitHub integration; GitHub Actions + Wrangler is an alternative, never a simultaneous competing production deployer.
 - Distinguish design decisions from verified live infrastructure. Do not report CI, DNS, Access, R2 or D1 as configured without inspecting actual resources.

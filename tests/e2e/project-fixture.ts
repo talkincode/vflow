@@ -46,7 +46,7 @@ export async function seedProjectLibrary(
       "雨巷第二集开场",
     ),
   });
-  await client.createProject({
+  await client.createProject({ authoringMode: "legacy",
     id: "city",
     name: "城市观察",
     description: "城市与街道的影像记录",
@@ -61,7 +61,7 @@ export async function seedProjectLibrary(
       document: projectComposition("city", id, title, description),
     });
   }
-  await client.createProject({
+  await client.createProject({ authoringMode: "legacy",
     id: "private",
     name: "私人草稿",
     description: "仅创建者可访问",

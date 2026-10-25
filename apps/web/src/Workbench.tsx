@@ -20,6 +20,8 @@ import {
   shotPreview,
 } from "./WorkspacePanels.tsx";
 
+const AuthoringPanel = React.lazy(() => import("./AuthoringPanel.tsx").then(module => ({ default: module.AuthoringPanel })));
+
 export type WorkbenchViewMode = "grid" | "list" | "topology";
 export interface WorkbenchProps {
   client: VideoComposeClient;
@@ -32,7 +34,7 @@ export interface WorkbenchProps {
 type CompositionData = Awaited<
   ReturnType<VideoComposeClient["getComposition"]>
 >;
-type WorkspaceTab = "shots" | "assets" | "subjects" | "history" | "source";
+type WorkspaceTab = "shots" | "assets" | "subjects" | "authoring" | "history" | "source";
 interface ShotDraft {
   description: string;
   duration: string;
@@ -127,6 +129,9 @@ export function Workbench({
     new Map<string, { baseRevision: number; operationId: string }>(),
   );
   const [tab, setTab] = useState<WorkspaceTab>("shots");
+  const [authoringVisited, setAuthoringVisited] = useState(false);
+  const [referenceDirty, setReferenceDirty] = useState(false);
+  useEffect(() => { if (tab === "authoring") setAuthoringVisited(true); }, [tab]);
   const [viewMode, setViewMode] = useState(initialView);
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -138,6 +143,11 @@ export function Workbench({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [batchSeconds, setBatchSeconds] = useState("3");
   const [sourceFormat, setSourceFormat] = useState<"yaml" | "json">("yaml");
+  const [editingCandidate, setEditingCandidate] = useState<{
+    assetId: string;
+    role: string;
+    notes: string;
+  } | null>(null);
   const inspectorRef = useRef<HTMLElement>(null);
   const doc = data?.revisionRecord.document;
   const head = data?.headRevision ?? 0;
@@ -161,6 +171,7 @@ export function Workbench({
         client.getComposition(projectId, compositionId),
         client.listSubjects(projectId),
         client.getProjectAccess(projectId),
+        client.getAuthoringWorkflow(projectId),
       ]);
       setData(composition);
       setSubjects(library);
@@ -188,14 +199,17 @@ export function Workbench({
     void refresh();
   }, [refresh]);
   useEffect(() => {
-    if (!dirtyCount) return;
+    setEditingCandidate(null);
+  }, [activeShotId]);
+  useEffect(() => {
+    if (!dirtyCount && !referenceDirty) return;
     const onLeave = (event: BeforeUnloadEvent): void => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", onLeave);
     return () => window.removeEventListener("beforeunload", onLeave);
-  }, [dirtyCount]);
+  }, [dirtyCount, referenceDirty]);
   const run = async (operation: () => Promise<void>): Promise<void> => {
     if (pendingRef.current) return;
     pendingRef.current = true;
@@ -439,6 +453,7 @@ export function Workbench({
       if (!(err instanceof DomainError && err.code === "ALREADY_EXISTS"))
         throw err;
     }
+    await client.getAuthoringWorkflow(projectId);
     await client.createComposition({
       projectId,
       document: {
@@ -530,6 +545,7 @@ export function Workbench({
     ["shots", "分镜"],
     ["assets", "素材"],
     ["subjects", "角色与道具"],
+    ["authoring", "参考制作"],
     ["history", "协作与历史"],
     ["source", "协议"],
   ] as const;
@@ -828,24 +844,217 @@ export function Workbench({
                           </div>
                         )}
                       </div>
-                      <div className="reference-thumbnails">
-                        {[
-                          ...activeShot.references.images,
-                          ...activeShot.references.videos,
-                        ].map((reference) => {
-                          const asset = assets.find(
-                            (item) => item.id === reference.asset,
-                          );
-                          return asset ? (
-                            <MediaPreview
-                              key={asset.id}
-                              compact
-                              asset={asset}
-                              url={contentUrl(asset)}
-                            />
-                          ) : null;
-                        })}
+                      <div className="reference-heading">
+                        <h3>分镜素材图</h3>
+                        <span data-testid="candidate-images-count">
+                          {activeShot.candidates.images.length}/5
+                        </span>
                       </div>
+                      <div
+                        className="candidate-materials-section"
+                        data-testid="inspector-candidate-images"
+                      >
+                        {activeShot.candidates.images.length ? (
+                          <div className="candidate-grid">
+                            {activeShot.candidates.images.map((cand) => {
+                              const asset = assets.find(
+                                (item) => item.id === cand.asset,
+                              );
+                              return (
+                                <div
+                                  key={cand.asset}
+                                  className="candidate-card"
+                                  data-testid={`candidate-card-${cand.asset}`}
+                                >
+                                  {asset ? (
+                                    <MediaPreview
+                                      key={asset.id}
+                                      compact
+                                      asset={asset}
+                                      url={contentUrl(asset)}
+                                    />
+                                  ) : (
+                                    <span className="empty-state">
+                                      {cand.asset}
+                                    </span>
+                                  )}
+                                  <div className="candidate-card-meta">
+                                    <span
+                                      className="candidate-asset-name"
+                                      title={cand.asset}
+                                    >
+                                      {cand.asset}
+                                    </span>
+                                    {cand.role && (
+                                      <span className="badge">{cand.role}</span>
+                                    )}
+                                    {cand.notes && (
+                                      <p className="candidate-note-text">
+                                        {cand.notes}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div className="candidate-card-buttons">
+                                    <button
+                                      type="button"
+                                      className="small-btn"
+                                      disabled={!canWrite || pending}
+                                      data-testid={`edit-candidate-${cand.asset}`}
+                                      onClick={() =>
+                                        setEditingCandidate({
+                                          assetId: cand.asset,
+                                          role: cand.role ?? "",
+                                          notes: cand.notes ?? "",
+                                        })
+                                      }
+                                    >
+                                      修改
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="small-btn danger"
+                                      disabled={!canWrite || pending}
+                                      data-testid={`detach-candidate-btn-${cand.asset}`}
+                                      onClick={() =>
+                                        void patch(
+                                          [
+                                            {
+                                              op: "detach_shot_candidate",
+                                              shotId: activeShotId,
+                                              mediaKind: "images",
+                                              assetId: cand.asset,
+                                            },
+                                          ],
+                                          `从 ${activeShotId} 移除素材图 ${cand.asset}`,
+                                        )
+                                      }
+                                    >
+                                      移除
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="empty-state">
+                            此镜头暂无素材图（最多可关联 5 张）。
+                          </div>
+                        )}
+                        {editingCandidate && (
+                          <div
+                            className="candidate-edit-box"
+                            data-testid="candidate-edit-form"
+                          >
+                            <h4>修改素材信息 ({editingCandidate.assetId})</h4>
+                            <label>
+                              角色/用途标签
+                              <input
+                                type="text"
+                                data-testid="edit-candidate-role-input"
+                                value={editingCandidate.role}
+                                onChange={(e) =>
+                                  setEditingCandidate({
+                                    ...editingCandidate,
+                                    role: e.target.value,
+                                  })
+                                }
+                                placeholder="例如: 首帧构图 / 主角特写"
+                              />
+                            </label>
+                            <label>
+                              备注说明
+                              <input
+                                type="text"
+                                data-testid="edit-candidate-notes-input"
+                                value={editingCandidate.notes}
+                                onChange={(e) =>
+                                  setEditingCandidate({
+                                    ...editingCandidate,
+                                    notes: e.target.value,
+                                  })
+                                }
+                                placeholder="添加素材说明或生成提示"
+                              />
+                            </label>
+                            <div className="candidate-edit-actions">
+                              <button
+                                type="button"
+                                disabled={pending}
+                                data-testid="save-candidate-edit-btn"
+                                onClick={async () => {
+                                  await patch(
+                                    [
+                                      {
+                                        op: "update_shot_candidate",
+                                        shotId: activeShotId,
+                                        mediaKind: "images",
+                                        assetId: editingCandidate.assetId,
+                                        candidate: {
+                                          role:
+                                            editingCandidate.role || undefined,
+                                          notes:
+                                            editingCandidate.notes || undefined,
+                                        },
+                                      },
+                                    ],
+                                    `更新素材 ${editingCandidate.assetId} 属性`,
+                                  );
+                                  setEditingCandidate(null);
+                                }}
+                              >
+                                保存修改
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary"
+                                onClick={() => setEditingCandidate(null)}
+                              >
+                                取消
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        <div className="candidate-limit-bar">
+                          {activeShot.candidates.images.length < 5 ? (
+                            <button
+                              type="button"
+                              className="secondary small-btn"
+                              onClick={() => setTab("assets")}
+                            >
+                              ＋ 从素材库添加素材图 (还可添加{" "}
+                              {5 - activeShot.candidates.images.length} 张)
+                            </button>
+                          ) : (
+                            <span className="badge warning">
+                              已达素材图上限 (5/5)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {Boolean(
+                        activeShot.references.images.length ||
+                          activeShot.references.videos.length,
+                      ) && (
+                        <div className="reference-thumbnails">
+                          {[
+                            ...activeShot.references.images,
+                            ...activeShot.references.videos,
+                          ].map((reference) => {
+                            const asset = assets.find(
+                              (item) => item.id === reference.asset,
+                            );
+                            return asset ? (
+                              <MediaPreview
+                                key={asset.id}
+                                compact
+                                asset={asset}
+                                url={contentUrl(asset)}
+                              />
+                            ) : null;
+                          })}
+                        </div>
+                      )}
                     </div>
                     <div className="editor-form">
                       <fieldset disabled={!canWrite || pending}>
@@ -1010,6 +1219,7 @@ export function Workbench({
                 client={client}
                 projectId={projectId}
                 activeShotId={activeShotId}
+                activeShot={activeShot}
                 assets={assets}
                 failed={assetsError}
                 active={tab === "assets"}
@@ -1036,6 +1246,9 @@ export function Workbench({
                 run={run}
                 patch={patch}
               />
+            </section>
+            <section role="tabpanel" id="workspace-panel-authoring" aria-labelledby="workspace-authoring" hidden={tab !== "authoring"}>
+              {(tab === "authoring" || authoringVisited) && <React.Suspense fallback={<p role="status">正在载入参考工作台…</p>}><AuthoringPanel client={client} projectId={projectId} composition={doc} compositionRevision={data.revisionRecord.revision} assets={assets} subjects={subjects} activeShotId={activeShotId} disabled={!canWrite || pending} active={tab === "authoring"} onDirtyChange={setReferenceDirty} patch={patch} /></React.Suspense>}
             </section>
             <section
               role="tabpanel"
@@ -1143,7 +1356,7 @@ export function Workbench({
           </div>
           <footer className="workspace-status" aria-live="polite">
             <span>
-              {notice ||
+              {referenceDirty ? "参考资料或审阅有未保存草稿" : notice ||
                 (dirtyCount
                   ? `${dirtyCount} 个镜头有未保存草稿`
                   : "所有修改已保存")}

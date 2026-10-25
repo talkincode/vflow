@@ -12,7 +12,7 @@ Video Compose 是面向人和多个 Agent 的开源视频作品编排协议与�
 
 ## 当前能力清单
 - **开源仓库与文档**：GitHub Public 仓库已创建；README、AGENTS 和架构文档与代码实现保持同步。
-- **本地核心实现与验收**：`packages/protocol`、`packages/domain`、`packages/client`、`apps/api`、`apps/web` 及 11 套 E2E/集成测试（`tests/e2e/01` 至 `11`）已实现；真实 Chromium 检查覆盖项目/多编排导航、新建与失败恢复、合成图片/视频/音频、100 镜头、只读/可写角色和 360–1920 像素布局。
+- **本地核心实现与验收**：`packages/protocol`、`packages/domain`、`packages/client`、`apps/api`、`apps/web` 及 15 套 E2E/集成测试（`tests/e2e/01` 至 `15`）已实现；真实 Chromium 检查覆盖项目/多编排导航、新建与失败恢复、合成图片/视频/音频、100 镜头、只读/可写角色和 360–1920 像素布局。
 - **Cloudflare 生产环境（M4 已部署核验）**：子域名 `https://video-compose.talkincode.net`、Cloudflare Access 可复用策略（SSO + Service Token）、D1（`video-compose-db`）与 R2（`video-compose-media`）真实绑定及线上端到端读写均已部署并实测通过。
 
 ## 非目标（铁律）
@@ -61,11 +61,14 @@ Video Compose 是面向人和多个 Agent 的开源视频作品编排协议与�
 | 不可变资产管理与受权预览 | 本地已实现 | 高 | 是 | 是 | ✅ (上传、图片解码、音视频播放/seek、Range/HEAD) | ✅ (完整性/覆盖/引用删除/416/缺文件) | ✅ (`writer`/`reader` 可预览；非成员/匿名拒绝) | ✅ (失败上传不登记资产；缺对象恢复后可重新读取) | `tests/e2e/03-immutable-assets.test.ts`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx`, `tests/e2e/10-media-and-editor-recovery.test.tsx`, `tests/browser/workbench.spec.ts` |
 | 角色/道具设定与参考图管理 | 本地已实现 | 高 | 是 | 是 | ✅ (候选表单、真实参考、批准、固定版本/变体绑定) | ✅ (并发冲突/未批准绑定拒绝/无参考表单拦截) | ✅ (`writer`/`reader`) | ✅ (冲突或越权保持原权威修订不变) | `tests/e2e/04-subjects-and-references.test.ts`, `tests/e2e/10-media-and-editor-recovery.test.tsx` |
 | 多 Agent 修订与审阅 | 本地已实现 | 高 | 是 | 是 | ✅ | ✅ (同字段并发修改返回结构化冲突) | ✅ (`writer`/`reader` Agent) | ✅ (冲突不污染 head，支持历史版本恢复) | `tests/e2e/05-multi-agent-revisions.test.ts` |
-| HTTP/MCP 接入 | 本地已实现 | 高 | 是 | 是 | ✅ | ✅ (未授权/非法调用返回结构化错误) | ✅ (匿名/`reader`/`writer`) | ✅ (幂等键重试与事务故障恢复) | `tests/e2e/06-http-and-mcp-parity.test.ts` |
+| HTTP/MCP 与 OAuth 接入 | 本地已实现 | 高 | 是 | 是 | ✅ (REST/MCP 等价调用；OAuth 2.1 动态注册、PKCE S256 协商、一键授权与 Bearer 调用) | ✅ (未授权/非法调用结构化错误；无效 PKCE/拒绝授权/过期码/已撤销令牌拒绝) | ✅ (匿名/`reader`/`writer`；授权主体权限继承与越权写入拦截) | ✅ (幂等键重试与事务故障恢复；RefreshToken 轮换与新令牌恢复) | `tests/e2e/06-http-and-mcp-parity.test.ts`, `tests/e2e/12-mcp-oauth.test.ts` |
 | 轻量工作台 | 本地已实现 | 中 | 是 | 是 | ✅ (三视图/中央标签/媒体/100 镜头/响应布局) | ✅ (只读禁写、保存失败、并发冲突、批量与排序失败) | ✅ (`writer`/`reader`，API 绕过拒绝) | ✅ (逐镜头草稿/原键重试/清空保存/局部撤销/批量原子回滚/排序重试/空库初始化) | `tests/e2e/07-lightweight-workbench.test.tsx`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx`, `tests/e2e/10-media-and-editor-recovery.test.tsx`, `tests/browser/workbench.spec.ts` |
+| 分镜素材图管理与上限限制 | 本地已实现 | 中 | 是 | 是 | ✅ (单镜头最多5张素材图、候选属性编辑、素材解除关联、未引用素材删除、工作台UI与MCP工具) | ✅ (单镜头超过5张素材图拒绝、协议校验拒绝、删除已引用资产拒绝) | ✅ (`writer` 可增改删，`reader` 拒绝写入和删除) | ✅ (超额添加保持原修订与候选不变，回滚保护) | `tests/e2e/13-shot-material-candidates.test.tsx` |
+| 类型化参考制作与无字序列 | 本地已实现，待发布 | 高 | 是 | 是 | ✅ (指导→分包→场景→序列→精确输入→实际记录) | ✅ (混合板、错归属/用途、未知审阅、非法宫格、超预算、循环、有损导出) | ✅ (`reader/writer/agent/非成员`；REST/MCP/资源/UI) | ✅ (put/review/approve/evidence 故障重试、并发/版本冲突、导入原子回滚、31+32 镜头保留) | `tests/e2e/14-reference-authoring.test.ts`, `tests/e2e/15-reference-integrity.test.ts`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx`, `tests/browser/reference-authoring.spec.ts`；[A01–A18 映射](reference-authoring.md#验收映射本地) |
 | JSON/YAML 交换 | 本地已实现 | 高 | 是 | 是 | ✅ | ✅ (损坏语法/缺失资产依赖原子拒绝) | ✅ (`reader` 可导出不可导入 / `writer` 可导入) | ✅ (导入失败保持目标项目原编排不变) | `tests/e2e/08-interchange-json-yaml.test.ts` |
 
 ### 已识别缺口和最低期望
+- **分镜素材与上限**：单个分镜最多允许关联 5 张素材图（图片候选），超过 5 张时领域操作与协议校验原子拒绝；支持修改候选素材的角色标签和备注说明，支持从镜头解除关联，支持从素材库删除未引用素材；工作台分镜检查器与素材库均提供交互，远程 MCP 工具 `asset_link`、`asset_update_candidate`、`asset_unlink` 与 `asset_delete` 等价支持。已由 `tests/e2e/13-shot-material-candidates.test.tsx` 验收。
 - **项目与编排**：浏览器首页列出当前身份有权访问的项目，可新建项目，从项目概览新建/进入/切换编排；工作台有返回项目的入口，复制地址和前进/后退正确。`writer` 能创建项目和编排；`reader` 可读但不能向该项目写入，非成员被拒；失败保留表单，创建重试不重复，跨项目不残留前一个项目的草稿或素材。已有 `11` 集成场景与真实 Chromium `projects.spec.ts` 验收。
 - **协议**：合法样例（含全局音轨 `audioTracks`、分镜依赖 `dependsOn`、候选集 `candidates`）通过；缺失 ID、`dependsOn` 循环依赖、引用无效均给出稳定机器错误；校验不修改输入。
 - **资产**：两阶段上传校验 SHA-256 后可跨镜头与全局音轨复用；哈希不匹配或无 `writer` 权限拒绝；失败上传不登记可见资产。
@@ -76,3 +79,7 @@ Video Compose 是面向人和多个 Agent 的开源视频作品编排协议与�
 - **交换**：JSON/YAML 导出重新导入语义不变；损坏格式或缺失引用依赖（未登记的 Asset / SubjectRevision）原子拒绝，原数据不变。
 
 真实 E2E/集成证据出现前，所有缺口均不得标记完成。
+
+## 参考制作工作流交付边界
+
+Issue #1 的协议、共享领域服务、MCP 指导/工具兜底、REST/client、工作台、D1 增量迁移及本地验收已实现。新项目默认 strict，旧项目保留 legacy 读取/整理路径。未对线上《旧桥分水》项目执行迁移、重建或生成。图片的同一身份、实际站位、无字与视频完整动作仍需有证据的人/外部视觉验收，不以结构校验或缩略图代替。详见 [参考制作](reference-authoring.md)。

@@ -117,6 +117,7 @@ export interface CompositionRevisionRecord {
 }
 
 export type TypedOperation =
+  | { op: "set_authoring"; authoring: import("@video-compose/protocol").CompositionAuthoring }
   | {
       op: "upsert_shot";
       shotId: string;
@@ -140,6 +141,19 @@ export type TypedOperation =
       shotId: string;
       mediaKind: "images" | "videos" | "audios";
       candidate: CandidateEntry;
+    }
+  | {
+      op: "detach_shot_candidate";
+      shotId: string;
+      mediaKind: "images" | "videos" | "audios";
+      assetId: string;
+    }
+  | {
+      op: "update_shot_candidate";
+      shotId: string;
+      mediaKind: "images" | "videos" | "audios";
+      assetId: string;
+      candidate: Partial<Omit<CandidateEntry, "asset">>;
     }
   | {
       op: "select_shot_output";
@@ -207,6 +221,11 @@ export interface ConflictDetail {
 }
 
 export type DomainErrorCode =
+  | "WORKFLOW_CONTEXT_REQUIRED" | "WORKFLOW_VERSION_MISMATCH"
+  | "REFERENCE_SCOPE_MISMATCH" | "REFERENCE_USAGE_AMBIGUOUS" | "REFERENCE_REVIEW_REQUIRED"
+  | "REFERENCE_CONFLICT_UNRESOLVED" | "GRID_CELL_REQUIRED" | "STORYBOARD_LAYOUT_INVALID"
+  | "STORYBOARD_TEXT_DETECTED" | "REFERENCE_BUDGET_EXCEEDED" | "MEDIA_DIMENSIONS_UNVERIFIED"
+  | "UNREPRESENTABLE_IN_V1"
   | "RANGE_NOT_SATISFIABLE"
   | "UNAUTHORIZED"
   | "FORBIDDEN"
@@ -236,6 +255,7 @@ export class DomainError extends Error {
 }
 
 export interface AttachSubjectReferenceInput {
+  workflowContext?: import("@video-compose/protocol").WorkflowContext;
   projectId: string;
   subjectId: string;
   baseRevision: number;

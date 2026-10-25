@@ -2,6 +2,21 @@ import { test, expect } from "@playwright/test";
 
 const demoUrl = "/projects/demo/compositions/episode-001";
 
+test("subject reference thumbnails open a readable full-size original", async ({ page }) => {
+  await page.goto(demoUrl);
+  await page.getByRole("tab", { name: "角色与道具", exact: true }).click();
+  const card = page.getByTestId("library-subject-character-main");
+  const thumbnail = card.locator("img");
+  await expect.poll(() => thumbnail.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(320);
+  const popupPromise = page.waitForEvent("popup");
+  await card.getByRole("link", { name: "查看原图 preview-png", exact: true }).click();
+  const original = await popupPromise;
+  await expect(original).toHaveURL(/\/assets\/preview-png\/content$/);
+  await expect.poll(() => original.locator("img").evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(320);
+  await original.close();
+  await expect(page.getByTestId("composition-revision")).toHaveText("修订 #1");
+});
+
 test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });

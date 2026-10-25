@@ -50,16 +50,15 @@ export function MediaPreview({
             onLoad={() => setLoaded(true)}
             onError={() => setFailed(true)}
           />
-          {!compact && (
             <a
               className="media-expand"
               href={url}
               target="_blank"
               rel="noreferrer"
+              aria-label={`查看原图 ${asset.id}`}
             >
               查看原图 ↗
             </a>
-          )}
         </>
       ) : video ? (
         compact ? (

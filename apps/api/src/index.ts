@@ -8,10 +8,16 @@ import {
 } from "@video-compose/domain";
 import { createApiApp } from "./app.ts";
 import type { AccessAuthConfig } from "./auth.ts";
+import {
+  D1OAuthStore,
+  InMemoryOAuthStore,
+  type OAuthStore,
+} from "./oauth.ts";
 
 export * from "./auth.ts";
 export * from "./mcp.ts";
 export * from "./app.ts";
+export * from "./oauth.ts";
 
 export interface WorkerEnv {
   DB?: CloudflareD1DatabaseLike;
@@ -30,22 +36,27 @@ export function createWorkerHandler(
   return {
     async fetch(request: Request, env?: WorkerEnv): Promise<Response> {
       const url = new URL(request.url);
-      const isApiOrMcp =
+      const isWorkerRoute =
         url.pathname === "/mcp" ||
         url.pathname === "/v1" ||
-        url.pathname.startsWith("/v1/");
+        url.pathname.startsWith("/v1/") ||
+        url.pathname === "/oauth" ||
+        url.pathname.startsWith("/oauth/") ||
+        url.pathname.startsWith("/.well-known/");
 
-      if (!isApiOrMcp && env?.ASSETS) {
+      if (!isWorkerRoute && env?.ASSETS) {
         return env.ASSETS.fetch(request);
       }
 
       let domain = defaultService;
+      let oauthStore: OAuthStore = new InMemoryOAuthStore();
       if (env?.DB) {
         const bucket = env.MEDIA_BUCKET
           ? new R2ObjectBucketAdapter(env.MEDIA_BUCKET)
           : new InMemoryObjectBucket();
         const store = new D1TransactionalStore(env.DB, bucket);
         domain = new VideoComposeDomainService(store);
+        oauthStore = new D1OAuthStore(env.DB);
       }
 
       let authConfig: AccessAuthConfig | undefined;
@@ -61,7 +72,7 @@ export function createWorkerHandler(
         }
       }
 
-      const { app } = createApiApp(domain, authConfig);
+      const { app } = createApiApp(domain, authConfig, oauthStore);
       return app.fetch(request);
     },
   };
