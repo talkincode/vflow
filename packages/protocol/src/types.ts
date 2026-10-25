@@ -6,6 +6,8 @@ export type ProjectRole = "reader" | "writer";
 export type ActorKind = "human" | "agent";
 
 export interface ActorIdentity {
+  /** Server-derived account owner; never read from a request body/header. */
+  userId?: string;
   actorId: string;
   actorKind: ActorKind;
 }

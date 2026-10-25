@@ -6,9 +6,11 @@ import {
   CompositionWorkspace,
   PageError,
 } from "./Projects.tsx";
+import { SessionBoundary } from "./AccountMenu.tsx";
+import { TrashPage } from "./TrashPage.tsx";
 import { readRoute } from "./routes.ts";
 
-export function App({
+function AppRoutes({
   client,
   pathname = window.location.pathname,
 }: {
@@ -16,6 +18,7 @@ export function App({
   pathname?: string;
 }): React.ReactElement {
   const route = readRoute(pathname);
+  if (route.kind === "trash") return <TrashPage client={client} />;
   if (route.kind === "projects") return <ProjectsPage client={client} />;
   if (route.kind === "project")
     return (
@@ -35,4 +38,15 @@ export function App({
       />
     );
   return <PageError message="没有找到这个页面，请检查地址或返回项目列表。" />;
+}
+
+export function App(props: {
+  client: VideoComposeClient;
+  pathname?: string;
+}): React.ReactElement {
+  return (
+    <SessionBoundary client={props.client}>
+      <AppRoutes {...props} />
+    </SessionBoundary>
+  );
 }

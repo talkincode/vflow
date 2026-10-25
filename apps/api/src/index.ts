@@ -8,11 +8,7 @@ import {
 } from "@video-compose/domain";
 import { createApiApp } from "./app.ts";
 import type { AccessAuthConfig } from "./auth.ts";
-import {
-  D1OAuthStore,
-  InMemoryOAuthStore,
-  type OAuthStore,
-} from "./oauth.ts";
+import { D1OAuthStore, InMemoryOAuthStore, type OAuthStore } from "./oauth.ts";
 
 export * from "./auth.ts";
 export * from "./mcp.ts";
@@ -26,6 +22,9 @@ export interface WorkerEnv {
     fetch(request: Request): Promise<Response>;
   };
   ALLOWED_SERVICE_TOKENS_JSON?: string;
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
+  ACCESS_JWKS_JSON?: string;
 }
 
 const fallbackMemoryService = new VideoComposeDomainService();
@@ -38,6 +37,7 @@ export function createWorkerHandler(
       const url = new URL(request.url);
       const isWorkerRoute =
         url.pathname === "/mcp" ||
+        url.pathname === "/logout" ||
         url.pathname === "/v1" ||
         url.pathname.startsWith("/v1/") ||
         url.pathname === "/oauth" ||
@@ -59,16 +59,25 @@ export function createWorkerHandler(
         oauthStore = new D1OAuthStore(env.DB);
       }
 
-      let authConfig: AccessAuthConfig | undefined;
+      let authConfig: AccessAuthConfig = {};
+      if (env?.ACCESS_TEAM_DOMAIN && env.ACCESS_AUD)
+        authConfig.access = {
+          issuer: `https://${env.ACCESS_TEAM_DOMAIN}`,
+          audience: env.ACCESS_AUD,
+          ...(env.ACCESS_JWKS_JSON
+            ? { jwks: JSON.parse(env.ACCESS_JWKS_JSON) }
+            : {}),
+        };
       if (env?.ALLOWED_SERVICE_TOKENS_JSON) {
         try {
           authConfig = {
+            ...authConfig,
             allowedServiceTokens: JSON.parse(
               env.ALLOWED_SERVICE_TOKENS_JSON,
             ) as AccessAuthConfig["allowedServiceTokens"],
           };
         } catch {
-          authConfig = undefined;
+          authConfig.allowedServiceTokens = {};
         }
       }
 

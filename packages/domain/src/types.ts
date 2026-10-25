@@ -16,6 +16,10 @@ import type {
 } from "@video-compose/protocol";
 
 export interface ProjectRecord {
+  ownerUserId?: string;
+  sharingMode?: "private" | "members";
+  membershipRevision?: number;
+  lifecycleRevision?: number;
   id: string;
   name: string;
   description?: string;
@@ -25,6 +29,8 @@ export interface ProjectRecord {
 }
 
 export interface CompositionSummary {
+  ownerUserId?: string;
+  lifecycleRevision?: number;
   id: string;
   projectId: string;
   title?: string;
@@ -32,6 +38,7 @@ export interface CompositionSummary {
 }
 
 export interface ProjectOverview {
+  isOwner?: boolean;
   project: ProjectRecord;
   role: ProjectRole;
   compositions: CompositionSummary[];
@@ -117,7 +124,10 @@ export interface CompositionRevisionRecord {
 }
 
 export type TypedOperation =
-  | { op: "set_authoring"; authoring: import("@video-compose/protocol").CompositionAuthoring }
+  | {
+      op: "set_authoring";
+      authoring: import("@video-compose/protocol").CompositionAuthoring;
+    }
   | {
       op: "upsert_shot";
       shotId: string;
@@ -221,10 +231,19 @@ export interface ConflictDetail {
 }
 
 export type DomainErrorCode =
-  | "WORKFLOW_CONTEXT_REQUIRED" | "WORKFLOW_VERSION_MISMATCH"
-  | "REFERENCE_SCOPE_MISMATCH" | "REFERENCE_USAGE_AMBIGUOUS" | "REFERENCE_REVIEW_REQUIRED"
-  | "REFERENCE_CONFLICT_UNRESOLVED" | "GRID_CELL_REQUIRED" | "STORYBOARD_LAYOUT_INVALID"
-  | "STORYBOARD_TEXT_DETECTED" | "REFERENCE_BUDGET_EXCEEDED" | "MEDIA_DIMENSIONS_UNVERIFIED"
+  | "RESOURCE_TRASHED"
+  | "PARENT_TRASHED"
+  | "WORKFLOW_CONTEXT_REQUIRED"
+  | "WORKFLOW_VERSION_MISMATCH"
+  | "REFERENCE_SCOPE_MISMATCH"
+  | "REFERENCE_USAGE_AMBIGUOUS"
+  | "REFERENCE_REVIEW_REQUIRED"
+  | "REFERENCE_CONFLICT_UNRESOLVED"
+  | "GRID_CELL_REQUIRED"
+  | "STORYBOARD_LAYOUT_INVALID"
+  | "STORYBOARD_TEXT_DETECTED"
+  | "REFERENCE_BUDGET_EXCEEDED"
+  | "MEDIA_DIMENSIONS_UNVERIFIED"
   | "UNREPRESENTABLE_IN_V1"
   | "RANGE_NOT_SATISFIABLE"
   | "UNAUTHORIZED"

@@ -1,88 +1,90 @@
+import {
+  createLocalJWKSet,
+  createRemoteJWKSet,
+  jwtVerify,
+  type JSONWebKeySet,
+} from "jose";
 import type { ActorIdentity } from "@video-compose/protocol";
 
 export interface AccessAuthConfig {
-  allowedServiceTokens?: Record<string, { secret: string; defaultActorId: string }>;
+  access?: { issuer: string; audience: string; jwks?: JSONWebKeySet };
+  allowedServiceTokens?: Record<
+    string,
+    { secret: string; defaultActorId: string; ownerUserId: string }
+  >;
 }
-
-/**
- * Extracts caller identity from Cloudflare Access headers.
- * - Human SSO sessions supply `cf-access-authenticated-user-email` (and `cf-access-jwt-assertion`).
- * - Headless Agent sessions supply `cf-access-client-id` + `cf-access-client-secret` (and optional `x-agent-id` for distinct agent auditing).
- */
-export function extractActorFromHeaders(
+const remoteKeys = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+const localKeys = new WeakMap<
+  JSONWebKeySet,
+  ReturnType<typeof createLocalJWKSet>
+>();
+const normalize = (s: string) => s.trim().toLowerCase();
+/** Only cryptographically verified Access claims or explicitly configured machine credentials create identities. */
+export async function extractActorFromHeaders(
   headers: Headers,
   config?: AccessAuthConfig,
-): ActorIdentity | null {
-  const userEmail = headers.get("cf-access-authenticated-user-email")?.trim();
-  const cookieHeader = headers.get("cookie") ?? "";
-  const cfAuthCookieMatch = cookieHeader.match(
-    /(?:^|;\s*)CF_Authorization=([^;]+)/,
-  );
-  const jwtAssertion =
-    headers.get("cf-access-jwt-assertion")?.trim() ||
-    cfAuthCookieMatch?.[1]?.trim();
-  if (userEmail && jwtAssertion) {
-    return {
-      actorId: userEmail,
-      actorKind: "human",
-    };
-  }
-
+): Promise<ActorIdentity | null> {
   const clientId = headers.get("cf-access-client-id")?.trim();
   const clientSecret = headers.get("cf-access-client-secret")?.trim();
   if (clientId && clientSecret) {
-    if (config?.allowedServiceTokens) {
-      const entry = config.allowedServiceTokens[clientId];
-      if (!entry || entry.secret !== clientSecret) {
-        return null;
-      }
-      const explicitAgentId = headers.get("x-agent-id")?.trim();
-      return {
-        actorId: explicitAgentId || entry.defaultActorId,
-        actorKind: "agent",
-      };
-    }
-    const explicitAgentId = headers.get("x-agent-id")?.trim();
+    const entry = config?.allowedServiceTokens?.[clientId];
+    if (
+      !entry ||
+      !entry.ownerUserId?.trim() ||
+      !entry.defaultActorId?.trim() ||
+      entry.secret !== clientSecret
+    )
+      return null;
     return {
-      actorId: explicitAgentId || `agent:${clientId}`,
+      actorId: entry.defaultActorId,
       actorKind: "agent",
+      userId: normalize(entry.ownerUserId),
     };
   }
-
-  if (jwtAssertion) {
-    const parts = jwtAssertion.split(".");
-    if (parts.length === 3 && parts[1]) {
-      try {
-        const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-        const padded = base64.padEnd(
-          base64.length + ((4 - (base64.length % 4)) % 4),
-          "=",
+  const cookie = headers
+    .get("cookie")
+    ?.match(/(?:^|;\s*)CF_Authorization=([^;]+)/)?.[1];
+  const token = headers.get("cf-access-jwt-assertion")?.trim() || cookie;
+  const access = config?.access;
+  if (!token || !access?.issuer || !access.audience) return null;
+  try {
+    let keys;
+    if (access.jwks) {
+      keys = localKeys.get(access.jwks);
+      if (!keys) {
+        keys = createLocalJWKSet(access.jwks);
+        localKeys.set(access.jwks, keys);
+      }
+    } else {
+      keys = remoteKeys.get(access.issuer);
+      if (!keys) {
+        keys = createRemoteJWKSet(
+          new URL("/cdn-cgi/access/certs", access.issuer),
         );
-        const payload = JSON.parse(atob(padded)) as {
-          email?: string;
-          common_name?: string;
-        };
-        if (typeof payload.email === "string" && payload.email.trim()) {
-          return {
-            actorId: payload.email.trim(),
-            actorKind: "human",
-          };
-        }
-        if (
-          typeof payload.common_name === "string" &&
-          payload.common_name.trim()
-        ) {
-          const explicitAgentId = headers.get("x-agent-id")?.trim();
-          return {
-            actorId: explicitAgentId || `agent:${payload.common_name.trim()}`,
-            actorKind: "agent",
-          };
-        }
-      } catch {
-        // Ignore malformed JWT payload and fall through
+        remoteKeys.set(access.issuer, keys);
       }
     }
+    const { payload } = await jwtVerify(token, keys, {
+      issuer: access.issuer,
+      audience: access.audience,
+      algorithms: ["RS256"],
+      requiredClaims: ["exp", "iss", "aud"],
+    });
+    if (typeof payload.email === "string" && payload.email.trim()) {
+      const id = normalize(payload.email);
+      return { actorId: id, actorKind: "human", userId: id };
+    }
+    if (typeof payload.common_name === "string") {
+      const entry = config?.allowedServiceTokens?.[payload.common_name];
+      if (entry?.ownerUserId?.trim() && entry.defaultActorId?.trim())
+        return {
+          actorId: entry.defaultActorId,
+          actorKind: "agent",
+          userId: normalize(entry.ownerUserId),
+        };
+    }
+  } catch {
+    /* fail closed: never fall back to an unverified email or decoded JWT */
   }
-
   return null;
 }

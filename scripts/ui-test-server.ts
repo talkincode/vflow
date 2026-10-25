@@ -10,13 +10,16 @@ import { seedProjectLibrary } from "../tests/e2e/project-fixture.ts";
 if (process.env.NODE_ENV === "production")
   throw new Error("The acceptance server is local-only.");
 const root = path.resolve(import.meta.dirname, "../apps/web/dist");
-const writer = {
-  "cf-access-authenticated-user-email": "alice@talkincode.net",
-  "cf-access-jwt-assertion": "local-acceptance",
-};
-let backend = createApiApp();
+import {
+  WRITER_AUTH,
+  READER_AUTH,
+  OUTSIDER_AUTH,
+  TEST_AUTH_CONFIG,
+} from "../tests/e2e/auth-fixture.ts";
+const writer = WRITER_AUTH;
+let backend = createApiApp(undefined, TEST_AUTH_CONFIG);
 async function reset(count = 100): Promise<void> {
-  backend = createApiApp();
+  backend = createApiApp(undefined, TEST_AUTH_CONFIG);
   const client = new VideoComposeClient({
     baseUrl: "http://localhost",
     headers: writer,
@@ -35,8 +38,16 @@ const server = createServer(async (request, response) => {
       response.end("reset");
       return;
     }
-    if (url.pathname === "/__test/reference-fixture" && request.method === "POST") {
-      const client = new VideoComposeClient({ baseUrl: "http://localhost", headers: writer, fetchFn: (input, init) => backend.app.fetch(new Request(String(input), init)) });
+    if (
+      url.pathname === "/__test/reference-fixture" &&
+      request.method === "POST"
+    ) {
+      const client = new VideoComposeClient({
+        baseUrl: "http://localhost",
+        headers: writer,
+        fetchFn: (input, init) =>
+          backend.app.fetch(new Request(String(input), init)),
+      });
       await seedReferences(client);
       response.end("reference fixture ready");
       return;
@@ -44,9 +55,15 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/__test/fail-next" && request.method === "POST") {
       const stage = url.searchParams.get("stage") ?? "patchComposition";
       if (
-        !["patchComposition", "createProject", "createComposition", "authoringWrite", "authoringEvidence"].includes(
-          stage,
-        )
+        ![
+          "patchComposition",
+          "createProject",
+          "createComposition",
+          "authoringWrite",
+          "authoringEvidence",
+          "lifecycleChange",
+          "setProjectMemberRole",
+        ].includes(stage)
       ) {
         response.writeHead(400);
         response.end("Unknown fault stage");
@@ -62,15 +79,14 @@ const server = createServer(async (request, response) => {
         if (value)
           headers.set(key, Array.isArray(value) ? value.join(",") : value);
       const role = request.headers["x-test-role"];
-      headers.set(
-        "cf-access-authenticated-user-email",
+      const identity =
         role === "reader"
-          ? "bob-reader@talkincode.net"
+          ? READER_AUTH
           : role === "outsider"
-            ? "outside@talkincode.net"
-            : "alice@talkincode.net",
-      );
-      headers.set("cf-access-jwt-assertion", "local-acceptance");
+            ? OUTSIDER_AUTH
+            : WRITER_AUTH;
+      for (const [key, value] of Object.entries(identity))
+        headers.set(key, value);
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const method = request.method ?? "GET";

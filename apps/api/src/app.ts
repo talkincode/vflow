@@ -7,7 +7,7 @@ import type { ActorIdentity } from "@video-compose/protocol";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { type AccessAuthConfig, extractActorFromHeaders } from "./auth.ts";
-import { handleMcpJsonRpc, type JsonRpcRequest } from "./mcp.ts";
+import { mcpHttp } from "./mcp-http.ts";
 import {
   hashToken,
   InMemoryOAuthStore,
@@ -28,6 +28,10 @@ function statusForDomainError(code: DomainErrorCode): ContentfulStatusCode {
       return 401;
     case "FORBIDDEN":
       return 403;
+    case "RESOURCE_TRASHED":
+      return 410;
+    case "PARENT_TRASHED":
+      return 409;
     case "NOT_FOUND":
       return 404;
     case "ALREADY_EXISTS":
@@ -64,7 +68,7 @@ export function createApiApp(
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers":
-      "Authorization, Content-Type, CF-Access-Client-Id, CF-Access-Client-Secret, x-agent-id",
+      "Authorization, Content-Type, CF-Access-Client-Id, CF-Access-Client-Secret, x-agent-id, MCP-Protocol-Version, Mcp-Method, Mcp-Name",
   };
 
   async function resolveActor(headers: Headers): Promise<ActorIdentity | null> {
@@ -82,9 +86,11 @@ export function createApiApp(
           return {
             actorId: token.owner,
             actorKind: explicitAgentId ? "agent" : "human",
+            userId: token.owner.trim().toLowerCase(),
           };
         }
       }
+      return null;
     }
     return extractActorFromHeaders(headers, authConfig);
   }
@@ -114,26 +120,125 @@ export function createApiApp(
   });
 
   // CORS preflight for machine & OAuth endpoints
-  app.options("/mcp", () => new Response(null, { status: 204, headers: corsHeaders }));
-  app.options("/oauth/*", () => new Response(null, { status: 204, headers: corsHeaders }));
-  app.options("/.well-known/*", () => new Response(null, { status: 204, headers: corsHeaders }));
+  app.options(
+    "/mcp",
+    () => new Response(null, { status: 204, headers: corsHeaders }),
+  );
+  app.options(
+    "/oauth/*",
+    () => new Response(null, { status: 204, headers: corsHeaders }),
+  );
+  app.options(
+    "/.well-known/*",
+    () => new Response(null, { status: 204, headers: corsHeaders }),
+  );
+
+  app.use("/v1/*", async (c, next) => {
+    await next();
+    c.header("Cache-Control", "private, no-store");
+    c.header("Vary", "Cookie, Authorization");
+  });
+  app.get("/v1/session", async (c) => {
+    const actor = await resolveActor(c.req.raw.headers);
+    if (!actor)
+      throw new DomainError("UNAUTHORIZED", "Authentication is required.");
+    return c.json({ actor, logoutUrl: "/logout" });
+  });
+  app.get(
+    "/logout",
+    () =>
+      new Response(null, {
+        status: 302,
+        headers: {
+          Location: "/cdn-cgi/access/logout",
+          "Clear-Site-Data": '"cache", "storage"',
+          "Cache-Control": "no-store",
+        },
+      }),
+  );
+  app.get("/v1/trash", async (c) =>
+    c.json({
+      items: await domain.lifecycle.list(await resolveActor(c.req.raw.headers)),
+    }),
+  );
+  app.delete("/v1/projects/:projectId", async (c) =>
+    c.json(
+      await domain.lifecycle.change(await resolveActor(c.req.raw.headers), {
+        ...(await c.req.json()),
+        projectId: c.req.param("projectId"),
+        id: c.req.param("projectId"),
+        kind: "project",
+        action: "trash",
+      }),
+    ),
+  );
+  app.post("/v1/projects/:projectId/restore", async (c) =>
+    c.json(
+      await domain.lifecycle.change(await resolveActor(c.req.raw.headers), {
+        ...(await c.req.json()),
+        projectId: c.req.param("projectId"),
+        id: c.req.param("projectId"),
+        kind: "project",
+        action: "restore",
+      }),
+    ),
+  );
+  app.delete("/v1/projects/:projectId/compositions/:compositionId", async (c) =>
+    c.json(
+      await domain.lifecycle.change(await resolveActor(c.req.raw.headers), {
+        ...(await c.req.json()),
+        projectId: c.req.param("projectId"),
+        id: c.req.param("compositionId"),
+        kind: "composition",
+        action: "trash",
+      }),
+    ),
+  );
+  app.post(
+    "/v1/projects/:projectId/compositions/:compositionId/restore-from-trash",
+    async (c) =>
+      c.json(
+        await domain.lifecycle.change(await resolveActor(c.req.raw.headers), {
+          ...(await c.req.json()),
+          projectId: c.req.param("projectId"),
+          id: c.req.param("compositionId"),
+          kind: "composition",
+          action: "restore",
+        }),
+      ),
+  );
 
   // RFC 9728 Protected Resource Metadata
-  const handleProtectedResource = (c: { req: { url: string }; json: (data: unknown, status: ContentfulStatusCode, headers: Record<string, string>) => Response }) => {
+  const handleProtectedResource = (c: {
+    req: { url: string };
+    json: (
+      data: unknown,
+      status: ContentfulStatusCode,
+      headers: Record<string, string>,
+    ) => Response;
+  }) => {
     const origin = new URL(c.req.url).origin;
     return c.json(
       {
         resource: `${origin}/mcp`,
         authorization_servers: [origin],
-        scopes_supported: ["video-compose.read", "video-compose.write", "video-compose.all"],
+        scopes_supported: [
+          "video-compose.read",
+          "video-compose.write",
+          "video-compose.all",
+        ],
         bearer_methods_supported: ["header"],
       },
       200,
       corsHeaders,
     );
   };
-  app.get("/.well-known/oauth-protected-resource", (c) => handleProtectedResource(c));
-  app.get("/.well-known/oauth-protected-resource/mcp", (c) => handleProtectedResource(c));
+  app.get("/.well-known/oauth-protected-resource", (c) =>
+    handleProtectedResource(c),
+  );
+  app.get("/.well-known/oauth-protected-resource/mcp", (c) =>
+    handleProtectedResource(c),
+  );
 
   // RFC 8414 Authorization Server Metadata
   app.get("/.well-known/oauth-authorization-server", (c) => {
@@ -153,7 +258,11 @@ export function createApiApp(
           "client_secret_basic",
         ],
         code_challenge_methods_supported: ["S256"],
-        scopes_supported: ["video-compose.read", "video-compose.write", "video-compose.all"],
+        scopes_supported: [
+          "video-compose.read",
+          "video-compose.write",
+          "video-compose.all",
+        ],
       },
       200,
       corsHeaders,
@@ -251,7 +360,8 @@ export function createApiApp(
       return c.text("Unknown or disabled client_id", 400);
     }
     const finalRedirectUri =
-      redirectUri || (client.redirectUris.length === 1 ? client.redirectUris[0] : "");
+      redirectUri ||
+      (client.redirectUris.length === 1 ? client.redirectUris[0] : "");
     if (!finalRedirectUri || !client.redirectUris.includes(finalRedirectUri)) {
       return c.text("Invalid or unregistered redirect_uri", 400);
     }
@@ -264,7 +374,10 @@ export function createApiApp(
     if (!codeChallenge || codeChallengeMethod !== "S256") {
       const u = new URL(finalRedirectUri);
       u.searchParams.set("error", "invalid_request");
-      u.searchParams.set("error_description", "PKCE with code_challenge_method=S256 is required");
+      u.searchParams.set(
+        "error_description",
+        "PKCE with code_challenge_method=S256 is required",
+      );
       if (state) u.searchParams.set("state", state);
       return c.redirect(u.toString(), 302);
     }
@@ -310,7 +423,12 @@ export function createApiApp(
     const decision = String(body.decision || "").trim();
 
     const grant = await oauthStore.getGrant(grantId);
-    if (!grant || grant.expiresAt < Date.now() || grant.approved || grant.usedAt) {
+    if (
+      !grant ||
+      grant.expiresAt < Date.now() ||
+      grant.approved ||
+      grant.usedAt
+    ) {
       return c.text("Authorization request expired or already processed", 400);
     }
     if (!csrf || csrf !== grant.csrf) {
@@ -318,13 +436,19 @@ export function createApiApp(
     }
     const actor = await resolveActor(c.req.raw.headers);
     if (!actor || actor.actorId !== grant.owner) {
-      return c.text("Please sign in as the owner who initiated the authorization", 403);
+      return c.text(
+        "Please sign in as the owner who initiated the authorization",
+        403,
+      );
     }
 
     const redirectUrl = new URL(grant.redirectUri);
     if (decision !== "allow") {
       redirectUrl.searchParams.set("error", "access_denied");
-      redirectUrl.searchParams.set("error_description", "User denied authorization");
+      redirectUrl.searchParams.set(
+        "error_description",
+        "User denied authorization",
+      );
       if (grant.state) redirectUrl.searchParams.set("state", grant.state);
       return c.redirect(redirectUrl.toString(), 302);
     }
@@ -346,7 +470,9 @@ export function createApiApp(
     let body: Record<string, string> = {};
     const contentType = c.req.header("content-type") || "";
     if (contentType.includes("application/json")) {
-      body = ((await c.req.json().catch(() => ({}))) as Record<string, string>) || {};
+      body =
+        ((await c.req.json().catch(() => ({}))) as Record<string, string>) ||
+        {};
     } else {
       const parsed = await c.req.parseBody().catch(() => ({}));
       for (const [k, v] of Object.entries(parsed)) {
@@ -380,7 +506,10 @@ export function createApiApp(
     const client = await oauthStore.getClient(clientId);
     if (!client || client.disabled) {
       return c.json(
-        { error: "invalid_client", error_description: "Unknown or disabled client" },
+        {
+          error: "invalid_client",
+          error_description: "Unknown or disabled client",
+        },
         401,
         corsHeaders,
       );
@@ -389,7 +518,10 @@ export function createApiApp(
     if (client.authMethod !== "none") {
       if (!clientSecret) {
         return c.json(
-          { error: "invalid_client", error_description: "Missing client_secret" },
+          {
+            error: "invalid_client",
+            error_description: "Missing client_secret",
+          },
           401,
           corsHeaders,
         );
@@ -397,7 +529,10 @@ export function createApiApp(
       const hashedSecret = await hashToken(clientSecret);
       if (hashedSecret !== client.secretHash) {
         return c.json(
-          { error: "invalid_client", error_description: "Invalid client credentials" },
+          {
+            error: "invalid_client",
+            error_description: "Invalid client credentials",
+          },
           401,
           corsHeaders,
         );
@@ -422,7 +557,12 @@ export function createApiApp(
 
       const codeHash = await hashToken(code);
       const grant = await oauthStore.getGrantByCodeHash(codeHash);
-      if (!grant || !grant.approved || grant.usedAt || grant.expiresAt < Date.now()) {
+      if (
+        !grant ||
+        !grant.approved ||
+        grant.usedAt ||
+        grant.expiresAt < Date.now()
+      ) {
         return c.json(
           {
             error: "invalid_grant",
@@ -586,7 +726,8 @@ export function createApiApp(
     return c.json(
       {
         error: "unsupported_grant_type",
-        error_description: "Only authorization_code and refresh_token are supported",
+        error_description:
+          "Only authorization_code and refresh_token are supported",
       },
       400,
       corsHeaders,
@@ -598,7 +739,9 @@ export function createApiApp(
     let body: Record<string, string> = {};
     const contentType = c.req.header("content-type") || "";
     if (contentType.includes("application/json")) {
-      body = ((await c.req.json().catch(() => ({}))) as Record<string, string>) || {};
+      body =
+        ((await c.req.json().catch(() => ({}))) as Record<string, string>) ||
+        {};
     } else {
       const parsed = await c.req.parseBody().catch(() => ({}));
       for (const [k, v] of Object.entries(parsed)) {
@@ -614,31 +757,134 @@ export function createApiApp(
   });
 
   // Remote MCP endpoint over authenticated Streamable HTTP
-  app.post("/mcp", async (c) => {
-    const actor = await resolveActor(c.req.raw.headers);
-    const rpc = (await c.req.json()) as JsonRpcRequest;
-    const response = await handleMcpJsonRpc(domain, actor, rpc);
-    const origin = new URL(c.req.url).origin;
-    if (response.error?.code === -32001) {
-      return c.json(response, 401, {
-        ...corsHeaders,
-        "WWW-Authenticate": `Bearer realm="video-compose", resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"`,
-      });
-    }
-    return c.json(response, 200, corsHeaders);
-  });
+  app.post("/mcp", async (c) =>
+    mcpHttp(
+      c.req.raw,
+      domain,
+      await resolveActor(c.req.raw.headers),
+      corsHeaders,
+    ),
+  );
+  app.on(
+    ["GET", "DELETE", "PUT", "PATCH"],
+    "/mcp",
+    () =>
+      new Response(null, {
+        status: 405,
+        headers: {
+          ...corsHeaders,
+          Allow: "POST, OPTIONS",
+          "Cache-Control": "no-store",
+        },
+      }),
+  );
 
-  app.get("/v1/projects/:projectId/authoring/workflow", async c => c.json(await domain.authoring.workflow(await resolveActor(c.req.raw.headers), c.req.param("projectId"), c.req.query("language") === "en" ? "en" : "zh")));
-  app.get("/v1/projects/:projectId/authoring/impact/:id/:revision", async c => c.json(await domain.authoring.impact(await resolveActor(c.req.raw.headers), c.req.param("projectId"), { id: c.req.param("id"), revision: Number(c.req.param("revision")) })));
-  app.get("/v1/projects/:projectId/authoring/documents", async c => c.json(await domain.authoring.list(await resolveActor(c.req.raw.headers), c.req.param("projectId"))));
-  app.get("/v1/projects/:projectId/authoring/documents/:id", async c => c.json(await domain.authoring.get(await resolveActor(c.req.raw.headers), c.req.param("projectId"), c.req.param("id"), c.req.query("revision") === undefined ? undefined : Number(c.req.query("revision")))));
-  app.post("/v1/projects/:projectId/authoring/documents", async c => c.json(await domain.authoring.put(await resolveActor(c.req.raw.headers), { ...await c.req.json(), projectId: c.req.param("projectId") }), 201));
-  app.post("/v1/projects/:projectId/authoring/documents/:id/review", async c => c.json(await domain.authoring.review(await resolveActor(c.req.raw.headers), { ...await c.req.json(), projectId: c.req.param("projectId"), id: c.req.param("id") })));
-  app.post("/v1/projects/:projectId/authoring/documents/:id/approve", async c => c.json(await domain.authoring.approve(await resolveActor(c.req.raw.headers), { ...await c.req.json(), projectId: c.req.param("projectId"), id: c.req.param("id") })));
-  app.post("/v1/projects/:projectId/authoring/validate", async c => c.json(await domain.authoring.validate(await resolveActor(c.req.raw.headers), c.req.param("projectId"), (await c.req.json()).document)));
-  app.post("/v1/projects/:projectId/authoring/prepare", async c => { const body = await c.req.json(); return c.json(await domain.authoring.prepare(await resolveActor(c.req.raw.headers), c.req.param("projectId"), body.request, body.workflowContext)); });
-  app.get("/v1/projects/:projectId/authoring/evidence", async c => c.json(await domain.authoring.evidence(await resolveActor(c.req.raw.headers), c.req.param("projectId"))));
-  app.post("/v1/projects/:projectId/authoring/evidence", async c => c.json(await domain.authoring.recordEvidence(await resolveActor(c.req.raw.headers), { ...await c.req.json(), projectId: c.req.param("projectId") }), 201));
+  app.get("/v1/projects/:projectId/authoring/workflow", async (c) =>
+    c.json(
+      await domain.authoring.workflow(
+        await resolveActor(c.req.raw.headers),
+        c.req.param("projectId"),
+        c.req.query("language") === "en" ? "en" : "zh",
+      ),
+    ),
+  );
+  app.get("/v1/projects/:projectId/authoring/impact/:id/:revision", async (c) =>
+    c.json(
+      await domain.authoring.impact(
+        await resolveActor(c.req.raw.headers),
+        c.req.param("projectId"),
+        { id: c.req.param("id"), revision: Number(c.req.param("revision")) },
+      ),
+    ),
+  );
+  app.get("/v1/projects/:projectId/authoring/documents", async (c) =>
+    c.json(
+      await domain.authoring.list(
+        await resolveActor(c.req.raw.headers),
+        c.req.param("projectId"),
+      ),
+    ),
+  );
+  app.get("/v1/projects/:projectId/authoring/documents/:id", async (c) =>
+    c.json(
+      await domain.authoring.get(
+        await resolveActor(c.req.raw.headers),
+        c.req.param("projectId"),
+        c.req.param("id"),
+        c.req.query("revision") === undefined
+          ? undefined
+          : Number(c.req.query("revision")),
+      ),
+    ),
+  );
+  app.post("/v1/projects/:projectId/authoring/documents", async (c) =>
+    c.json(
+      await domain.authoring.put(await resolveActor(c.req.raw.headers), {
+        ...(await c.req.json()),
+        projectId: c.req.param("projectId"),
+      }),
+      201,
+    ),
+  );
+  app.post(
+    "/v1/projects/:projectId/authoring/documents/:id/review",
+    async (c) =>
+      c.json(
+        await domain.authoring.review(await resolveActor(c.req.raw.headers), {
+          ...(await c.req.json()),
+          projectId: c.req.param("projectId"),
+          id: c.req.param("id"),
+        }),
+      ),
+  );
+  app.post(
+    "/v1/projects/:projectId/authoring/documents/:id/approve",
+    async (c) =>
+      c.json(
+        await domain.authoring.approve(await resolveActor(c.req.raw.headers), {
+          ...(await c.req.json()),
+          projectId: c.req.param("projectId"),
+          id: c.req.param("id"),
+        }),
+      ),
+  );
+  app.post("/v1/projects/:projectId/authoring/validate", async (c) =>
+    c.json(
+      await domain.authoring.validate(
+        await resolveActor(c.req.raw.headers),
+        c.req.param("projectId"),
+        (await c.req.json()).document,
+      ),
+    ),
+  );
+  app.post("/v1/projects/:projectId/authoring/prepare", async (c) => {
+    const body = await c.req.json();
+    return c.json(
+      await domain.authoring.prepare(
+        await resolveActor(c.req.raw.headers),
+        c.req.param("projectId"),
+        body.request,
+        body.workflowContext,
+      ),
+    );
+  });
+  app.get("/v1/projects/:projectId/authoring/evidence", async (c) =>
+    c.json(
+      await domain.authoring.evidence(
+        await resolveActor(c.req.raw.headers),
+        c.req.param("projectId"),
+      ),
+    ),
+  );
+  app.post("/v1/projects/:projectId/authoring/evidence", async (c) =>
+    c.json(
+      await domain.authoring.recordEvidence(
+        await resolveActor(c.req.raw.headers),
+        { ...(await c.req.json()), projectId: c.req.param("projectId") },
+      ),
+      201,
+    ),
+  );
 
   // REST /v1/projects
   app.get("/v1/projects", async (c) => {
@@ -669,13 +915,17 @@ export function createApiApp(
 
   app.get("/v1/projects/:projectId/overview", async (c) => {
     const actor = await resolveActor(c.req.raw.headers);
-    return c.json(await domain.getProjectOverview(actor, c.req.param("projectId")));
+    return c.json(
+      await domain.getProjectOverview(actor, c.req.param("projectId")),
+    );
   });
 
   app.put("/v1/projects/:projectId/members/:targetActorId", async (c) => {
     const actor = await resolveActor(c.req.raw.headers);
     const body = await c.req.json();
     const project = await domain.setProjectMemberRole(actor, {
+      baseRevision: body.baseRevision,
+      operationId: body.operationId,
       projectId: c.req.param("projectId"),
       targetActorId: c.req.param("targetActorId"),
       role: body.role ?? null,
@@ -869,20 +1119,23 @@ export function createApiApp(
     return c.json({ snapshot });
   });
 
-  app.post("/v1/projects/:projectId/subjects/:subjectId/references", async (c) => {
-    const actor = await resolveActor(c.req.raw.headers);
-    const body = await c.req.json();
-    const snapshot = await domain.attachSubjectReference(actor, {
-      workflowContext: body.workflowContext,
-      projectId: c.req.param("projectId"),
-      subjectId: c.req.param("subjectId"),
-      baseRevision: Number(body.baseRevision),
-      operationId: String(body.operationId ?? ""),
-      variant: String(body.variant ?? ""),
-      entry: body.entry,
-    });
-    return c.json({ snapshot }, 201);
-  });
+  app.post(
+    "/v1/projects/:projectId/subjects/:subjectId/references",
+    async (c) => {
+      const actor = await resolveActor(c.req.raw.headers);
+      const body = await c.req.json();
+      const snapshot = await domain.attachSubjectReference(actor, {
+        workflowContext: body.workflowContext,
+        projectId: c.req.param("projectId"),
+        subjectId: c.req.param("subjectId"),
+        baseRevision: Number(body.baseRevision),
+        operationId: String(body.operationId ?? ""),
+        variant: String(body.variant ?? ""),
+        entry: body.entry,
+      });
+      return c.json({ snapshot }, 201);
+    },
+  );
 
   app.post("/v1/projects/:projectId/subjects/:subjectId/approve", async (c) => {
     const actor = await resolveActor(c.req.raw.headers);
@@ -956,20 +1209,23 @@ export function createApiApp(
     return c.json(result);
   });
 
-  app.patch("/v1/projects/:projectId/compositions/:compositionId", async (c) => {
-    const actor = await resolveActor(c.req.raw.headers);
-    const body = await c.req.json();
-    const result = await domain.patchComposition(actor, {
-      workflowContext: body.workflowContext,
-      projectId: c.req.param("projectId"),
-      compositionId: c.req.param("compositionId"),
-      baseRevision: Number(body.baseRevision),
-      operationId: String(body.operationId ?? ""),
-      operations: body.operations ?? [],
-      message: body.message,
-    });
-    return c.json(result);
-  });
+  app.patch(
+    "/v1/projects/:projectId/compositions/:compositionId",
+    async (c) => {
+      const actor = await resolveActor(c.req.raw.headers);
+      const body = await c.req.json();
+      const result = await domain.patchComposition(actor, {
+        workflowContext: body.workflowContext,
+        projectId: c.req.param("projectId"),
+        compositionId: c.req.param("compositionId"),
+        baseRevision: Number(body.baseRevision),
+        operationId: String(body.operationId ?? ""),
+        operations: body.operations ?? [],
+        message: body.message,
+      });
+      return c.json(result);
+    },
+  );
 
   app.get(
     "/v1/projects/:projectId/compositions/:compositionId/history",
@@ -1011,7 +1267,10 @@ export function createApiApp(
         compositionId: c.req.param("compositionId"),
         revision: revParam ? Number(revParam) : undefined,
         format,
-        targetVersion: c.req.query("targetVersion") === "video-compose/v1" ? "video-compose/v1" : undefined,
+        targetVersion:
+          c.req.query("targetVersion") === "video-compose/v1"
+            ? "video-compose/v1"
+            : undefined,
       });
       return c.json(exported);
     },
@@ -1043,17 +1302,20 @@ export function createApiApp(
     return c.json({ proposal }, 201);
   });
 
-  app.post("/v1/projects/:projectId/proposals/:proposalId/approve", async (c) => {
-    const actor = await resolveActor(c.req.raw.headers);
-    const body = await c.req.json();
-    const result = await domain.approveProposal(actor, {
-      workflowContext: body.workflowContext,
-      projectId: c.req.param("projectId"),
-      proposalId: c.req.param("proposalId"),
-      operationId: String(body.operationId ?? ""),
-    });
-    return c.json(result);
-  });
+  app.post(
+    "/v1/projects/:projectId/proposals/:proposalId/approve",
+    async (c) => {
+      const actor = await resolveActor(c.req.raw.headers);
+      const body = await c.req.json();
+      const result = await domain.approveProposal(actor, {
+        workflowContext: body.workflowContext,
+        projectId: c.req.param("projectId"),
+        proposalId: c.req.param("proposalId"),
+        operationId: String(body.operationId ?? ""),
+      });
+      return c.json(result);
+    },
+  );
 
   return { app, domain, oauthStore };
 }

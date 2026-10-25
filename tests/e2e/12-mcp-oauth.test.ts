@@ -1,3 +1,4 @@
+import { TEST_AUTH_CONFIG } from "./auth-fixture.ts";
 import { createApiApp } from "@video-compose/api";
 import { describe, expect, it } from "vitest";
 import { HUMAN_READER_HEADERS, HUMAN_WRITER_HEADERS } from "./helpers.ts";
@@ -26,7 +27,7 @@ async function createPkcePair(): Promise<{ verifier: string; challenge: string }
 
 describe("E2E 12 — MCP OAuth 2.1 (RFC 9728, RFC 8414, RFC 7591, PKCE S256)", () => {
   it("uses the requested vflow origin for OAuth discovery and Bearer challenges while preserving the old hostname", async () => {
-    const { app } = createApiApp();
+    const { app } = createApiApp(undefined,TEST_AUTH_CONFIG);
     for (const origin of ["https://vflow.talkincode.net", "https://video-compose.talkincode.net"]) {
       const metadata = await app.request(`${origin}/.well-known/oauth-authorization-server`);
       expect(await metadata.json()).toMatchObject({ issuer: origin, authorization_endpoint: `${origin}/oauth/authorize`, token_endpoint: `${origin}/oauth/token`, registration_endpoint: `${origin}/oauth/register` });
@@ -39,7 +40,7 @@ describe("E2E 12 — MCP OAuth 2.1 (RFC 9728, RFC 8414, RFC 7591, PKCE S256)", (
   });
 
   it("Happy Path: Complete OAuth 2.1 flow connects client, negotiates PKCE, and enables MCP tool execution", async () => {
-    const { app, domain } = createApiApp();
+    const { app, domain } = createApiApp(undefined,TEST_AUTH_CONFIG);
 
     // 1. Unauthenticated request to /mcp returns 401 with WWW-Authenticate header
     const initialMcpRes = await app.request("/mcp", {
@@ -186,7 +187,7 @@ describe("E2E 12 — MCP OAuth 2.1 (RFC 9728, RFC 8414, RFC 7591, PKCE S256)", (
   });
 
   it("Failure Paths: Invalid PKCE, Denied consent, Expired code, and Revoked token are properly rejected", async () => {
-    const { app } = createApiApp();
+    const { app } = createApiApp(undefined,TEST_AUTH_CONFIG);
 
     // Register client
     const registerRes = await app.request("/oauth/register", {
@@ -326,7 +327,7 @@ describe("E2E 12 — MCP OAuth 2.1 (RFC 9728, RFC 8414, RFC 7591, PKCE S256)", (
   });
 
   it("Roles & Recovery: Enforces reader/writer role authorization and recovers session via refresh token", async () => {
-    const { app, domain } = createApiApp();
+    const { app, domain } = createApiApp(undefined,TEST_AUTH_CONFIG);
 
     // Create a shared project first
     await domain.createProject({ actorId: "alice@talkincode.net", actorKind: "human" }, {

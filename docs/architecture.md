@@ -89,3 +89,7 @@ D1 migration 0003 adds whole-record immutable material histories and external in
 A portable v2 bundle includes transitive material/subject/asset metadata and fixed composition baselines required by storyboard sequences. Import validates hashes, immutable conflicts, chronology and lineage atomically, preserves existing history, and refuses v1 overwrites of v2 semantics. Existing strict imports require baseRevision, and operationId receipts prevent duplicate imports after lost responses.
 
 The web reference workspace displays clean independent tiles and source boards with selectable crop overlays. Metadata and review controls are outside image pixels. It records unknown versus passed checks, previews prepared/actual inputs, and preserves editing content after failure. Read-only viewers can inspect and prepare but cannot promote or write. Full workflow, limitations, compatibility and rollback: [reference-authoring.md](reference-authoring.md).
+
+## Private ownership and resource lifecycle
+
+New projects bind to the verified account and default private. Explicit project sharing retains reader/writer capabilities, while membership management and project trash/restore are owner-only. Service identities require a configured owner mapping; request headers cannot choose a principal. Soft deletion uses independent immutable lifecycle events and gates all descendants without changing portable documents or deleting media/history. See [accounts and trash](accounts-and-trash.md) for endpoint, migration, logout and rollback contracts.

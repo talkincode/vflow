@@ -10,9 +10,16 @@ import {
   type UploadSessionRecord,
 } from "./types.ts";
 
+export const resourceKey = (projectId: string, entityId: string): string =>
+  JSON.stringify([projectId, entityId]);
+
 export interface DomainStateSnapshot {
+  lifecycle: Record<string, import("./lifecycle.ts").LifecycleRecord>;
   materials: Record<string, import("@video-compose/protocol").MaterialRecord>;
-  generationEvidence: Record<string, import("@video-compose/protocol").GenerationEvidence>;
+  generationEvidence: Record<
+    string,
+    import("@video-compose/protocol").GenerationEvidence
+  >;
   projects: Record<string, ProjectRecord>;
   assets: Record<string, AssetRecord>;
   uploadSessions: Record<string, UploadSessionRecord>;
@@ -35,6 +42,7 @@ export interface DomainStateSnapshot {
 
 export function createEmptyStateSnapshot(): DomainStateSnapshot {
   return {
+    lifecycle: {},
     materials: {},
     generationEvidence: {},
     projects: {},
@@ -78,13 +86,18 @@ export async function computeSha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 export class InMemoryObjectBucket implements ObjectBucketAdapter {
-  private readonly objects = new Map<string, { data: Uint8Array; mimeType: string }>();
+  private readonly objects = new Map<
+    string,
+    { data: Uint8Array; mimeType: string }
+  >();
 
   async put(key: string, data: Uint8Array, mimeType: string): Promise<void> {
     this.objects.set(key, { data: new Uint8Array(data), mimeType });
   }
 
-  async get(key: string): Promise<{ data: Uint8Array; mimeType: string } | null> {
+  async get(
+    key: string,
+  ): Promise<{ data: Uint8Array; mimeType: string } | null> {
     const found = this.objects.get(key);
     if (!found) return null;
     return { data: new Uint8Array(found.data), mimeType: found.mimeType };

@@ -497,7 +497,7 @@ describe("E2E 15 — grids, lineage, rollback and legacy migration", () => {
     }
     // Removing a policy simulates an existing D1 project predating this migration.
     await h.domain.store.runInTransaction("legacy-fixture", (draft) => {
-      delete draft.materials[`${projectId}::workflow-policy`];
+      delete draft.materials[JSON.stringify([projectId,"workflow-policy"])];
     });
     expect((await h.writerClient.getAuthoringWorkflow(projectId)).mode).toBe(
       "legacy",

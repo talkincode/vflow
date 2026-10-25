@@ -6,15 +6,13 @@ import type {
   SubjectSnapshot,
 } from "@video-compose/protocol";
 import {
+  resourceKey,
   createEmptyStateSnapshot,
   type DomainStateSnapshot,
   type DomainStore,
   type ObjectBucketAdapter,
 } from "./storage.ts";
-import {
-  DomainError,
-  type TypedOperation,
-} from "./types.ts";
+import { DomainError, type TypedOperation } from "./types.ts";
 
 export interface CloudflareD1PreparedStatementLike {
   bind(...values: unknown[]): CloudflareD1PreparedStatementLike;
@@ -62,7 +60,9 @@ export class R2ObjectBucketAdapter implements ObjectBucketAdapter {
     });
   }
 
-  async get(key: string): Promise<{ data: Uint8Array; mimeType: string } | null> {
+  async get(
+    key: string,
+  ): Promise<{ data: Uint8Array; mimeType: string } | null> {
     const obj = await this.r2.get(key);
     if (!obj) return null;
     const ab = await obj.arrayBuffer();
@@ -91,7 +91,7 @@ export class R2ObjectBucketAdapter implements ObjectBucketAdapter {
 }
 
 function compositeKey(projectId: string, entityId: string): string {
-  return `${projectId}::${entityId}`;
+  return resourceKey(projectId, entityId);
 }
 
 export class D1TransactionalStore implements DomainStore {
@@ -140,16 +140,24 @@ export class D1TransactionalStore implements DomainStore {
       idemRes,
       referenceDocsRes,
       referenceEvidenceRes,
+      lifecycleRes,
     ] = await Promise.all([
-      this.db.prepare("SELECT version FROM store_meta WHERE id = 1").all<{ version: number }>(),
       this.db
-        .prepare("SELECT id, name, description, created_at, created_by FROM projects")
+        .prepare("SELECT version FROM store_meta WHERE id = 1")
+        .all<{ version: number }>(),
+      this.db
+        .prepare(
+          "SELECT id, name, description, created_at, created_by, owner_user_id, sharing_mode, membership_revision FROM projects",
+        )
         .all<{
           id: string;
           name: string;
           description: string | null;
           created_at: string;
           created_by: string;
+          owner_user_id: string | null;
+          sharing_mode: "private" | "members";
+          membership_revision: number;
         }>(),
       this.db
         .prepare("SELECT project_id, actor_id, role FROM project_members")
@@ -233,7 +241,9 @@ export class D1TransactionalStore implements DomainStore {
           created_at: string;
         }>(),
       this.db
-        .prepare("SELECT project_id, id, title, head_revision FROM compositions")
+        .prepare(
+          "SELECT project_id, id, title, head_revision FROM compositions",
+        )
         .all<{
           project_id: string;
           id: string;
@@ -297,11 +307,32 @@ export class D1TransactionalStore implements DomainStore {
       this.db
         .prepare("SELECT idem_key, result_json FROM idempotency_records")
         .all<{ idem_key: string; result_json: string }>(),
-      this.db.prepare("SELECT project_id, id, record_json FROM reference_documents").all<{ project_id: string; id: string; record_json: string }>(),
-      this.db.prepare("SELECT project_id, id, record_json FROM reference_evidence").all<{ project_id: string; id: string; record_json: string }>(),
+      this.db
+        .prepare("SELECT project_id, id, record_json FROM reference_documents")
+        .all<{ project_id: string; id: string; record_json: string }>(),
+      this.db
+        .prepare("SELECT project_id, id, record_json FROM reference_evidence")
+        .all<{ project_id: string; id: string; record_json: string }>(),
+      this.db
+        .prepare(
+          "SELECT project_id, kind, id, record_json FROM resource_lifecycle",
+        )
+        .all<{
+          project_id: string;
+          kind: string;
+          id: string;
+          record_json: string;
+        }>(),
     ]);
 
     const version = metaRes.results[0]?.version ?? 0;
+    for (const row of lifecycleRes.results) {
+      const record = JSON.parse(
+        row.record_json,
+      ) as import("./lifecycle.ts").LifecycleRecord;
+      state.lifecycle[JSON.stringify([row.project_id, row.kind, row.id])] =
+        record;
+    }
 
     for (const row of projectsRes.results) {
       state.projects[row.id] = {
@@ -310,6 +341,9 @@ export class D1TransactionalStore implements DomainStore {
         ...(row.description ? { description: row.description } : {}),
         createdAt: row.created_at,
         createdBy: row.created_by,
+        sharingMode: row.sharing_mode,
+        membershipRevision: row.membership_revision,
+        ...(row.owner_user_id ? { ownerUserId: row.owner_user_id } : {}),
         members: {},
       };
     }
@@ -331,7 +365,9 @@ export class D1TransactionalStore implements DomainStore {
         storageKey: a.storage_key,
         ...(a.width !== null ? { width: a.width } : {}),
         ...(a.height !== null ? { height: a.height } : {}),
-        ...(a.duration_frames !== null ? { durationFrames: a.duration_frames } : {}),
+        ...(a.duration_frames !== null
+          ? { durationFrames: a.duration_frames }
+          : {}),
         ...(a.lineage_json
           ? { lineage: JSON.parse(a.lineage_json) as Record<string, unknown> }
           : {}),
@@ -354,7 +390,9 @@ export class D1TransactionalStore implements DomainStore {
         createdBy: s.created_by,
         ...(s.width !== null ? { width: s.width } : {}),
         ...(s.height !== null ? { height: s.height } : {}),
-        ...(s.duration_frames !== null ? { durationFrames: s.duration_frames } : {}),
+        ...(s.duration_frames !== null
+          ? { durationFrames: s.duration_frames }
+          : {}),
         ...(s.lineage_json
           ? { lineage: JSON.parse(s.lineage_json) as Record<string, unknown> }
           : {}),
@@ -482,8 +520,13 @@ export class D1TransactionalStore implements DomainStore {
       state.idempotencyRecords[idem.idem_key] = JSON.parse(idem.result_json);
     }
 
-    for (const row of referenceDocsRes.results) state.materials[compositeKey(row.project_id, row.id)] = JSON.parse(row.record_json);
-    for (const row of referenceEvidenceRes.results) state.generationEvidence[compositeKey(row.project_id, row.id)] = JSON.parse(row.record_json);
+    for (const row of referenceDocsRes.results)
+      state.materials[compositeKey(row.project_id, row.id)] = JSON.parse(
+        row.record_json,
+      );
+    for (const row of referenceEvidenceRes.results)
+      state.generationEvidence[compositeKey(row.project_id, row.id)] =
+        JSON.parse(row.record_json);
     return { version, state };
   }
 
@@ -496,7 +539,8 @@ export class D1TransactionalStore implements DomainStore {
     stageName: string,
     fn: (draft: DomainStateSnapshot) => T | Promise<T>,
   ): Promise<T> {
-    const { version, state: beforeState } = await this.loadSnapshotWithVersion();
+    const { version, state: beforeState } =
+      await this.loadSnapshotWithVersion();
     const draft = structuredClone(beforeState);
     const result = await fn(draft);
 
@@ -507,16 +551,27 @@ export class D1TransactionalStore implements DomainStore {
     // Optimistic compare-and-swap version bump
     stmts.push(
       this.db
-        .prepare("UPDATE store_meta SET version = ? WHERE id = 1 AND version = ?")
+        .prepare(
+          "UPDATE store_meta SET version = ? WHERE id = 1 AND version = ?",
+        )
         .bind(version + 1, version),
     );
+
+    for (const r of Object.values(draft.lifecycle))
+      stmts.push(
+        this.db
+          .prepare(
+            "INSERT OR REPLACE INTO resource_lifecycle (project_id,kind,id,record_json) VALUES (?,?,?,?)",
+          )
+          .bind(r.projectId, r.kind, r.id, JSON.stringify(r)),
+      );
 
     // Projects & members
     for (const proj of Object.values(draft.projects)) {
       stmts.push(
         this.db
           .prepare(
-            "INSERT OR REPLACE INTO projects (id, name, description, created_at, created_by) VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO projects (id, name, description, created_at, created_by, owner_user_id, sharing_mode, membership_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
           )
           .bind(
             proj.id,
@@ -524,6 +579,9 @@ export class D1TransactionalStore implements DomainStore {
             proj.description ?? null,
             proj.createdAt,
             proj.createdBy,
+            proj.ownerUserId ?? null,
+            proj.sharingMode ?? "private",
+            proj.membershipRevision ?? 0,
           ),
       );
       stmts.push(
@@ -749,10 +807,22 @@ export class D1TransactionalStore implements DomainStore {
     }
 
     for (const record of Object.values(draft.materials)) {
-      stmts.push(this.db.prepare("INSERT OR REPLACE INTO reference_documents (project_id, id, record_json) VALUES (?, ?, ?)").bind(record.projectId, record.id, JSON.stringify(record)));
+      stmts.push(
+        this.db
+          .prepare(
+            "INSERT OR REPLACE INTO reference_documents (project_id, id, record_json) VALUES (?, ?, ?)",
+          )
+          .bind(record.projectId, record.id, JSON.stringify(record)),
+      );
     }
     for (const record of Object.values(draft.generationEvidence)) {
-      stmts.push(this.db.prepare("INSERT OR REPLACE INTO reference_evidence (project_id, id, record_json) VALUES (?, ?, ?)").bind(record.projectId, record.id, JSON.stringify(record)));
+      stmts.push(
+        this.db
+          .prepare(
+            "INSERT OR REPLACE INTO reference_evidence (project_id, id, record_json) VALUES (?, ?, ?)",
+          )
+          .bind(record.projectId, record.id, JSON.stringify(record)),
+      );
     }
     const batchResults = await this.db.batch(stmts);
     const casChanges = batchResults[0]?.meta?.changes;

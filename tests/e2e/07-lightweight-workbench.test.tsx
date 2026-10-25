@@ -148,6 +148,7 @@ describe("E2E 07 — 轻量工作台 (Lightweight Three-View React Workbench)", 
     );
 
     // 5. Undo Revision -> restores Revision #1 content as Revision #3
+    await waitFor(() => expect((screen.getByTestId("btn-undo") as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId("btn-undo"));
     await waitFor(() => {
       expect(screen.getByTestId("composition-revision").textContent).toBe(
