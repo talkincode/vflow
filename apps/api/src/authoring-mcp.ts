@@ -11,6 +11,33 @@ import {
 } from "@video-compose/protocol";
 import type { JsonRpcRequest, McpToolDefinition } from "./mcp.ts";
 
+/** ChatGPT's tool importer requires a schema object in array.items.
+ * Fixed homogeneous tuples have an equivalent homogeneous array schema.
+ * Keep the authoritative protocol/resource schema and domain validation intact.
+ */
+function toolSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(toolSchema);
+  if (!value || typeof value !== "object") return value;
+  const schema = Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [key, toolSchema(child)]),
+  );
+  if (schema.type === "array" && Array.isArray(schema.items)) {
+    const items = schema.items;
+    if (
+      !items.length ||
+      schema.minItems !== items.length ||
+      schema.maxItems !== items.length ||
+      items.some((item) => JSON.stringify(item) !== JSON.stringify(items[0]))
+    )
+      throw new Error(
+        "MCP tuple inputs must be fixed-length and homogeneous before projection.",
+      );
+    schema.items = items[0];
+  }
+  return schema;
+}
+const materialToolSchema = toolSchema(MATERIAL_DOCUMENT_JSON_SCHEMA);
+
 const project = { type: "string", description: "Authorized project ID" };
 const workflowContext = {
   type: "object",
@@ -85,7 +112,7 @@ export const AUTHORING_TOOLS: McpToolDefinition[] = [
       "Create a new immutable candidate revision after reading authoring_workflow_get. Full typed manifest; reviews supplied through CRUD are ignored. Images/crops must already be uploaded.",
     inputSchema: {
       type: "object",
-      properties: { ...mutations, document: MATERIAL_DOCUMENT_JSON_SCHEMA },
+      properties: { ...mutations, document: materialToolSchema },
       required: [
         "projectId",
         "document",
@@ -154,7 +181,7 @@ export const AUTHORING_TOOLS: McpToolDefinition[] = [
       type: "object",
       properties: {
         projectId: project,
-        document: MATERIAL_DOCUMENT_JSON_SCHEMA,
+        document: materialToolSchema,
       },
       required: ["projectId", "document"],
     },
