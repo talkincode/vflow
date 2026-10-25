@@ -5,7 +5,9 @@ import {
   StreamableHTTPClientTransport as ModernTransport,
 } from "@modelcontextprotocol/client";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { createApiApp } from "@video-compose/api";
+import { createApiApp, MCP_TOOLS_MANIFEST } from "@video-compose/api";
+import Ajv from "ajv";
+import { MATERIAL_DOCUMENT_JSON_SCHEMA } from "@video-compose/protocol";
 import { TEST_AUTH_CONFIG, WRITER_AUTH } from "./auth-fixture.ts";
 
 function fixture() {
@@ -165,6 +167,72 @@ describe("E2E 17 — strict MCP action discovery and Streamable HTTP transport",
       body: JSON.stringify(rpc),
     });
     expect(origin.status).toBe(403);
+  });
+  it("exports importer-compatible array items and preserves exact storyboard bounds validation", async () => {
+    const { app } = fixture();
+    const response = await app.request("/mcp", {
+      method: "POST",
+      headers: { ...WRITER_AUTH, "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "schema-regression",
+        method: "tools/list",
+      }),
+    });
+    const { result } = (await response.json()) as {
+      result: { tools: typeof MCP_TOOLS_MANIFEST };
+    };
+    const visit = (value: unknown) => {
+      if (!value || typeof value !== "object") return;
+      const node = value as Record<string, unknown>;
+      if (node.type === "array") expect(node.items).toBeDefined();
+      expect(Array.isArray(node.items)).toBe(false);
+      for (const child of Object.values(node))
+        if (typeof child === "object") visit(child);
+    };
+    for (const tool of result.tools) visit(tool.inputSchema);
+    type MaterialSchema = {
+      anyOf: Array<{
+        properties: {
+          panels?: {
+            items: {
+              properties: {
+                entities: { items: { properties: { bounds: object } } };
+              };
+            };
+          };
+        };
+      }>;
+    };
+    const original = (
+      MATERIAL_DOCUMENT_JSON_SCHEMA as unknown as MaterialSchema
+    ).anyOf[3].properties.panels!.items.properties.entities.items.properties
+      .bounds;
+    const ajv = new Ajv({ allErrors: true });
+    const originalValidate = ajv.compile(original);
+    for (const name of ["authoring_document_put", "reference_plan_validate"]) {
+      const schema = result.tools.find((t) => t.name === name)!.inputSchema
+        .properties.document as MaterialSchema;
+      const bounds =
+        schema.anyOf[3].properties.panels!.items.properties.entities.items
+          .properties.bounds;
+      expect(bounds).toMatchObject({
+        type: "array",
+        minItems: 4,
+        maxItems: 4,
+        items: { type: "number", minimum: 0, maximum: 1 },
+      });
+      const validate = ajv.compile(bounds);
+      for (const value of [
+        [0, 0, 0.5, 1],
+        [0, 0, 1],
+        [0, 0, 1, 1, 1],
+        [-1, 0, 1, 1],
+        [0, 0, 2, 1],
+        [0, 0, "1", 1],
+      ])
+        expect(validate(value)).toBe(originalValidate(value));
+    }
   });
   it("acknowledges notifications and client responses with empty 202, never malformed JSON-RPC", async () => {
     const { app } = fixture();

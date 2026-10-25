@@ -34,3 +34,11 @@
 ## 发布与回退
 
 本改动不需要修改项目/编排文档或素材。当前工作分支同时包含账号隔离与回收站及其 0004 迁移，不能直接全量发布并声称只有发现修复。若单独发布兼容补丁，应从当前线上 SHA 分离仅 MCP 传输/发现与相关测试、文档，再执行独立构建与发布验收；若合并发布，则执行账号功能既定的迁移与归属核对方案。此记录不代表发布已执行。
+
+## ChatGPT 导入校验回归（2026-10-26）
+
+已安装的 vflow 插件在管理页刷新工具时返回 HTTP 400，具体错误为 `mcp_validation: Invalid MCP tool schema for tool 'authoring_document_put'`。不能以通用 JSON Schema 编译通过或官方 SDK 能列举工具替代 ChatGPT 导入验收。
+
+资料 Schema 中 `bounds` 使用固定四元素数字元组，Draft-07 导出为数组形式的 `items`。MCP 适配层现将固定、同构元组等价投影为对象形式的 `items`，保留 `minItems: 4`、`maxItems: 4` 及每项 0–1 约束。只影响 `authoring_document_put` / `reference_plan_validate` 的工具描述；协议 Schema、资源中的完整 Schema、REST 和领域校验保持原状。不同类型或非固定元组拒绝自动投影，必须明确设计兼容描述。
+
+E2E17 通过 HTTP tools/list 检查全部工具数组项格式，并用 Schema 验证器对比投影前后的合法值、错误长度、错误类型及越界数字。发布后必须再次通过 ChatGPT 管理页“刷新工具”，并在插件详情中确认可用工具实际出现。
