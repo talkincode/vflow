@@ -1,5 +1,5 @@
-import { computeSha256Hex } from "@video-compose/domain";
-import { PROTOCOL_VERSION } from "@video-compose/protocol";
+import { computeSha256Hex } from "@vflow/domain";
+import { PROTOCOL_VERSION } from "@vflow/protocol";
 import { describe, expect, it } from "vitest";
 import { createTestHarness, utf8Bytes } from "./helpers.ts";
 

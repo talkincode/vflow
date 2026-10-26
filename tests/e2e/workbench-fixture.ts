@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { VideoComposeClient } from "@video-compose/client";
-import { PROTOCOL_VERSION, type ShotDefinition } from "@video-compose/protocol";
+import type { VFlowClient } from "@vflow/client";
+import { PROTOCOL_VERSION, type ShotDefinition } from "@vflow/protocol";
 export async function seedWorkbench(
-  client: VideoComposeClient,
+  client: VFlowClient,
   count = 3,
 ): Promise<void> {
   await client.createProject({ authoringMode: "legacy",

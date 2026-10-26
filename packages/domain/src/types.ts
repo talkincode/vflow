@@ -13,7 +13,7 @@ import type {
   SubjectKind,
   SubjectSnapshot,
   SubjectVariant,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 
 export interface ProjectRecord {
   ownerUserId?: string;
@@ -126,7 +126,7 @@ export interface CompositionRevisionRecord {
 export type TypedOperation =
   | {
       op: "set_authoring";
-      authoring: import("@video-compose/protocol").CompositionAuthoring;
+      authoring: import("@vflow/protocol").CompositionAuthoring;
     }
   | {
       op: "upsert_shot";
@@ -274,7 +274,7 @@ export class DomainError extends Error {
 }
 
 export interface AttachSubjectReferenceInput {
-  workflowContext?: import("@video-compose/protocol").WorkflowContext;
+  workflowContext?: import("@vflow/protocol").WorkflowContext;
   projectId: string;
   subjectId: string;
   baseRevision: number;

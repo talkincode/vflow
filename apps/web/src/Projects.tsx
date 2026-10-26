@@ -1,6 +1,7 @@
-import type { VideoComposeClient } from "@video-compose/client";
-import { DomainError } from "@video-compose/domain";
-import { PROTOCOL_VERSION } from "@video-compose/protocol";
+import type { VFlowClient } from "@vflow/client";
+import { DomainError } from "@vflow/domain";
+import { PROTOCOL_VERSION } from "@vflow/protocol";
+import { WorkspaceIcon } from "./WorkspaceIcon.tsx";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AccountMenu } from "./AccountMenu.tsx";
 import {
@@ -66,14 +67,14 @@ function PageHeader({
   client,
 }: {
   children?: React.ReactNode;
-  client?: VideoComposeClient;
+  client?: VFlowClient;
 }): React.ReactElement {
   return (
     <header className="app-header project-header">
-      <a className="brand" href="/" aria-label="Video Compose 首页">
+      <a className="brand" href="/" aria-label="vflow 首页">
         <img src="/logo.svg" alt="" width="34" height="34" />
         <span>
-          Video Compose<small>作品编排与协作</small>
+          vflow<small>作品编排与协作</small>
         </span>
       </a>
       <nav aria-label="项目导航">{children ?? <span>项目管理</span>}</nav>
@@ -131,7 +132,7 @@ export function ProjectsPage({
   client,
   navigate = navigateTo,
 }: {
-  client: VideoComposeClient;
+  client: VFlowClient;
   navigate?: Navigate;
 }): React.ReactElement {
   const read = useCallback(() => client.listProjects(), [client]);
@@ -158,12 +159,17 @@ export function ProjectsPage({
         <div className="project-hero">
           <div>
             <span className="eyebrow">PROJECT LIBRARY / 创作空间</span>
-            <h1>从一个项目开始</h1>
-            <p>把编排、素材与角色设定放在一起，让每部作品都有自己的空间。</p>
+            <h1>你的创作项目</h1>
+            <p>从这里进入作品。分镜、素材和角色参考，集中在一个清晰的创作空间。</p>
           </div>
           <button className="primary" onClick={() => setCreating(true)}>
             ＋ 新建项目
           </button>
+        </div>
+        <div className="studio-guide" aria-label="项目工作方式">
+          <div><WorkspaceIcon name="shots" /><span><strong>编排镜头</strong><p>整理画面顺序、时长与提示词</p></span></div>
+          <div><WorkspaceIcon name="assets" /><span><strong>管理素材</strong><p>集中查看图片、视频和音频</p></span></div>
+          <div><WorkspaceIcon name="subjects" /><span><strong>保持角色一致</strong><p>用固定版本的设定与参考图连接镜头</p></span></div>
         </div>
         <div className="project-list-toolbar">
           <h2>
@@ -209,7 +215,7 @@ export function ProjectsPage({
           </div>
         ) : (
           <div className="project-grid">
-            {visible.map((project, index) => (
+            {visible.map((project) => (
               <a
                 className="project-card"
                 key={project.id}
@@ -222,7 +228,7 @@ export function ProjectsPage({
                     {project.name.slice(0, 1)}
                   </span>
                   <span className="project-card-index">
-                    {String(index + 1).padStart(2, "0")} ↗
+                    打开项目 ↗
                   </span>
                 </div>
                 <h2>{project.name}</h2>
@@ -254,7 +260,7 @@ export function ProjectPage({
   projectId,
   navigate = navigateTo,
 }: {
-  client: VideoComposeClient;
+  client: VFlowClient;
   projectId: string;
   navigate?: Navigate;
 }): React.ReactElement {
@@ -460,7 +466,7 @@ export function CompositionWorkspace({
   projectId,
   compositionId,
 }: {
-  client: VideoComposeClient;
+  client: VFlowClient;
   projectId: string;
   compositionId: string;
 }): React.ReactElement {
@@ -519,7 +525,7 @@ function CreateDialog({
   onClose,
   navigate,
 }: {
-  client: VideoComposeClient;
+  client: VFlowClient;
   kind: "project" | "composition";
   projectId?: string;
   open: boolean;

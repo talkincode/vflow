@@ -1,7 +1,13 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
-export const AUTHORING_VERSION = "video-compose/reference-workflow/v1" as const;
+export const AUTHORING_VERSION = "vflow/reference-workflow/v1" as const;
+/** Pre-rename document identifier, still accepted so older material revisions stay readable. */
+export const LEGACY_AUTHORING_VERSION =
+  "video-compose/reference-workflow/v1" as const;
+export type AuthoringSchemaVersion =
+  | typeof AUTHORING_VERSION
+  | typeof LEGACY_AUTHORING_VERSION;
 export const AUTHORING_POLICY_VERSION = "reference-authoring/1" as const;
 const id = z
   .string()
@@ -99,7 +105,10 @@ export const ViewPinSchema = z
   .strict();
 export type ViewPin = z.infer<typeof ViewPinSchema>;
 const common = {
-  schemaVersion: z.literal(AUTHORING_VERSION),
+  schemaVersion: z.union([
+    z.literal(AUTHORING_VERSION),
+    z.literal(LEGACY_AUTHORING_VERSION),
+  ]),
   id,
   title: z.string().trim().min(1).max(300),
 };
@@ -297,7 +306,7 @@ export interface ResolvedGenerationInput {
   sourceBoard?: string;
 }
 export interface GenerationInputPacket {
-  schemaVersion: typeof AUTHORING_VERSION;
+  schemaVersion: AuthoringSchemaVersion;
   projectId: string;
   policyVersion: typeof AUTHORING_POLICY_VERSION;
   request: GenerationInputRequest;

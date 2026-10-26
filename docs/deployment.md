@@ -1,10 +1,10 @@
-# Deployment and Authentication Contract — Video Compose
+# Deployment and Authentication Contract — vflow
 
 **Status: Live Cloudflare Workers deployment verified (2026-10-16).** Keep this document aligned with `AGENTS.md`, `docs/architecture.md`, and the Mira project's `Memories/environment.md` and `Memories/deploy.md`.
 
 ## Fixed target
-- **Public source**: `https://github.com/talkincode/video-compose`, canonical deployment branch `main`.
-- **Application runtime**: **Cloudflare Workers**, TypeScript (`video-compose`). Frontend React/Vite output (`apps/web/dist`) is served by the same Worker using Workers Static Assets (`ASSETS`, with `run_worker_first: ["/v1/*", "/mcp"]`); API and MCP use the Worker route. `workers_dev` is disabled (`false`) to prevent bypassing custom domain Access controls.
+- **Public source**: `https://github.com/talkincode/vflow`, canonical deployment branch `main`.
+- **Application runtime**: **Cloudflare Workers**, TypeScript project `vflow` (deployed Worker name `video-compose`, retained until a coordinated resource rename). Frontend React/Vite output (`apps/web/dist`) is served by the same Worker using Workers Static Assets (`ASSETS`, with `run_worker_first: ["/v1/*", "/mcp"]`); API and MCP use the Worker route. `workers_dev` is disabled (`false`) to prevent bypassing custom domain Access controls.
 - **Canonical hostname**: `https://vflow.talkincode.net`; retain `https://video-compose.talkincode.net` as a compatibility alias on the same Worker. The vflow route and Access destinations must be independently read back after promotion. Zone: `talkincode.net` / `e452c151cde1d9856336ffd76f80bf75`.
 - **State**: Cloudflare D1 (`video-compose-db`, ID `028d0760-9c64-4f4d-876e-8e6b33236acc`, schema migration `0001_initial.sql` applied) for project and revision metadata; private R2 (`video-compose-media`) for immutable reference images/audio/video and other media; no per-file permanent signed URLs in composition definitions.
 
@@ -29,10 +29,25 @@
 - D1 schema changes and asset migrations require separate forward/backward compatibility and recovery planning. Never assume Worker rollback undoes migrations.
 - Publish a real deployment URL or success claim only after checking the actual Cloudflare resources and protected HTTP behavior.
 
-## Verified live infrastructure (2026-10-16)
+## Naming: vflow and retained identifiers
+
+The project, package scope, protocol identifiers and canonical hostname are `vflow`. These deployed or historical identifiers are intentionally **not** renamed here, because renaming them requires a coordinated Cloudflare/GitHub migration and would break existing sessions, OAuth clients or stored documents:
+
+| Layer | Current value | Reason retained |
+| --- | --- | --- |
+| Cloudflare Worker | `video-compose` | Deployed identity; renaming creates a new Worker and requires re-attaching custom domains and Access apps. |
+| D1 database | `video-compose-db` (`028d0760-9c64-4f4d-876e-8e6b33236acc`) | Live data; renaming means create/export/import/repoint, not a config edit. |
+| R2 bucket | `video-compose-media` | Immutable media identity; bucket rename is a data migration. |
+| Access policies | `video-compose-human-allow`, `video-compose-service-tokens` | Reusable policies referenced by Access apps and machine credentials. |
+| Hostname alias | `video-compose.talkincode.net` | Keeps existing links, sessions and OAuth clients working. |
+| Wire identifiers | `video-compose/v1`, `video-compose/v2`, `video-compose/reference-workflow/v1`, `video-compose://` resource URIs | Stored in D1 documents and used by existing MCP clients. Read paths accept them; new writes emit `vflow/*`. |
+
+A future infrastructure rename must be executed as its own verified migration with rollback evidence, and this table updated only after read-back.
+
+## Verified live infrastructure (2026-10-16, recorded on the legacy hostname)
 - **Cloudflare Account ID**: `83b40c9065a6f4631f4ab6cda824a21a`
 - **Cloudflare Zone**: `talkincode.net` (`e452c151cde1d9856336ffd76f80bf75`, status `active`)
-- **Cloudflare Worker**: `video-compose` (initial deployed Version ID `5b45e8c5-2478-4e15-9117-899086d6ac8d`, custom domain `video-compose.talkincode.net`, `workers_dev: false`)
+- **Cloudflare Worker**: `video-compose` (initial deployed Version ID `5b45e8c5-2478-4e15-9117-899086d6ac8d`, custom domain `video-compose.talkincode.net` at the time, `workers_dev: false`)
 - **Cloudflare D1 Database**: `video-compose-db` (`028d0760-9c64-4f4d-876e-8e6b33236acc`, region `APAC`, `0001_initial.sql` applied)
 - **Cloudflare R2 Bucket**: `video-compose-media` (`Standard` storage class, bound as `MEDIA_BUCKET`)
 - **Cloudflare Access Application**: `video-compose.talkincode.net` (App ID `72992495-1fba-419e-83e7-d825db14f557`, AUD `87564c49249682da499869e50295186b3488c730ec5bd236105a2db4598453ec`)
@@ -44,6 +59,8 @@
   - Authenticated REST + D1 + R2 round-trip (`demo` project, `asset-lina-turnaround-v1` R2 upload + SHA-256 verification, `char-lina` Subject rev 1, `episode-001` Composition rev 1) -> `201 Created`
   - Authenticated MCP (`POST https://video-compose.talkincode.net/mcp` `tools/list` and `composition_get`) -> `200 OK` (24 MCP tools registered, `char-lina@1#raincoat` resolved)
 - **Not yet configured**: Native Cloudflare Workers Builds GitHub auto-trigger (current deployment executed via authenticated Wrangler CLI).
+
+Hostnames below are recorded exactly as checked on that date; re-run the same checks after any hostname or Worker rename.
 
 ## Workbench UI release procedure (2026-10-16)
 
@@ -66,13 +83,13 @@
 - **Worker Version ID**: `c33a40cd-9d62-4cdb-9dd2-58fbefa5679d` (prior OAuth base `2a05f4ac-65c0-4514-9c8b-b55a7ed794e2`)
 - **D1 Migration**: Applied `0002_mcp_oauth.sql` to `video-compose-db` (`028d0760-9c64-4f4d-876e-8e6b33236acc`), creating `mcp_clients`, `mcp_grants`, `mcp_tokens`.
 - **Tool Schema Compliance**: Added standard JSON Schema `inputSchema` for all 26 tools in `MCP_TOOLS_MANIFEST` and handled `notifications/initialized`, `ping`, and dynamic `protocolVersion` negotiation for full OpenAI/ChatGPT MCP compatibility.
-- **Cloudflare Access Application**: Added machine bypass application `Video Compose MCP machine` (App ID `23185069-e6c1-4de2-a816-fcea36215257`, AUD `22b0af63bc95085c9f3acccf5cbb5122f410e837e2d702f6947a0892b3b5cd50`).
+- **Cloudflare Access Application**: Added machine bypass application `Video Compose MCP machine` (App ID `23185069-e6c1-4de2-a816-fcea36215257`, AUD `22b0af63bc95085c9f3acccf5cbb5122f410e837e2d702f6947a0892b3b5cd50`). The display name is retained because the resource predates the vflow rename.
   - Destinations bypassed for automated MCP clients: `/mcp`, `/oauth/token`, `/oauth/register`, `/oauth/revoke`, `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp`, `/.well-known/oauth-authorization-server`.
   - Human consent endpoint (`/oauth/authorize`) remains strictly protected by root Access SSO application (`72992495-1fba-419e-83e7-d825db14f557`).
-- **Live Verification**:
+- **Live Verification** (recorded on the legacy hostname):
   - `GET https://video-compose.talkincode.net/.well-known/oauth-protected-resource` -> `200 OK`
   - `GET https://video-compose.talkincode.net/.well-known/oauth-authorization-server` -> `200 OK`
-  - `POST https://video-compose.talkincode.net/mcp` unauthenticated -> `401 Unauthorized` with `WWW-Authenticate: Bearer realm="video-compose", resource_metadata="https://video-compose.talkincode.net/.well-known/oauth-protected-resource/mcp"`
+  - `POST https://video-compose.talkincode.net/mcp` unauthenticated -> `401 Unauthorized` with `WWW-Authenticate: Bearer realm="video-compose", resource_metadata="https://video-compose.talkincode.net/.well-known/oauth-protected-resource/mcp"` (the realm now reads `vflow`; the rename did not change OAuth behaviour)
   - `POST https://video-compose.talkincode.net/oauth/register` -> `201 Created`
   - `POST https://video-compose.talkincode.net/mcp` `tools/list` -> `200 OK` (26 tools returned, each having compliant `inputSchema`)
   - `GET https://video-compose.talkincode.net/oauth/authorize` -> `302 Found` to Zero Trust SSO login

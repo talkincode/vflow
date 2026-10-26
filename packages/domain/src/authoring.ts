@@ -27,7 +27,7 @@ import {
   type ReferenceOwner,
   type RevisionPin,
   type WorkflowContext,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 import {
   resourceKey,
   computeSha256Hex,
@@ -183,7 +183,7 @@ function ownerDiagnostics(
   return [];
 }
 function reviewDiagnostics(
-  review: import("@video-compose/protocol").MaterialReview | undefined,
+  review: import("@vflow/protocol").MaterialReview | undefined,
   category: keyof typeof REQUIRED_REVIEW_CHECKS,
   path: string,
 ): AuthoringDiagnostic[] {
@@ -1068,7 +1068,7 @@ export class ReferenceAuthoringService {
       operationId: string;
       workflowContext?: WorkflowContext;
       targets: string[];
-      review: import("@video-compose/protocol").MaterialReview;
+      review: import("@vflow/protocol").MaterialReview;
     },
   ) {
     return this.write(
@@ -1635,7 +1635,7 @@ export class ReferenceAuthoringService {
 export function assertStrictSubjectReferences(
   state: State,
   projectId: string,
-  subject: import("@video-compose/protocol").SubjectSnapshot,
+  subject: import("@vflow/protocol").SubjectSnapshot,
   context?: WorkflowContext,
 ): void {
   if (!isStrictProject(state, projectId)) return;

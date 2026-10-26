@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createApiApp } from "../apps/api/src/app.ts";
-import { VideoComposeClient } from "../packages/client/src/index.ts";
+import { VFlowClient } from "../packages/client/src/index.ts";
 import { seedReferences } from "../tests/e2e/reference-fixture.ts";
 import { seedWorkbench } from "../tests/e2e/workbench-fixture.ts";
 import { seedProjectLibrary } from "../tests/e2e/project-fixture.ts";
@@ -20,7 +20,7 @@ const writer = WRITER_AUTH;
 let backend = createApiApp(undefined, TEST_AUTH_CONFIG);
 async function reset(count = 100): Promise<void> {
   backend = createApiApp(undefined, TEST_AUTH_CONFIG);
-  const client = new VideoComposeClient({
+  const client = new VFlowClient({
     baseUrl: "http://localhost",
     headers: writer,
     fetchFn: async (input, init) =>
@@ -42,7 +42,7 @@ const server = createServer(async (request, response) => {
       url.pathname === "/__test/reference-fixture" &&
       request.method === "POST"
     ) {
-      const client = new VideoComposeClient({
+      const client = new VFlowClient({
         baseUrl: "http://localhost",
         headers: writer,
         fetchFn: (input, init) =>

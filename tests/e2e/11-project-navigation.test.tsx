@@ -6,7 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { ProjectOverview } from "@video-compose/domain";
+import type { ProjectOverview } from "@vflow/domain";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../apps/web/src/App.tsx";

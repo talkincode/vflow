@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
-import type { VideoComposeClient } from "@video-compose/client";
+import type { VFlowClient } from "@vflow/client";
 export function AccountMenu({
   client,
 }: {
-  client?: VideoComposeClient;
+  client?: VFlowClient;
 }): React.ReactElement {
   const [account, setAccount] = useState("");
   useEffect(() => {
@@ -35,7 +35,7 @@ export function SessionBoundary({
   client,
   children,
 }: {
-  client: VideoComposeClient;
+  client: VFlowClient;
   children: React.ReactNode;
 }): React.ReactElement {
   const [account, setAccount] = useState<string | null>(null);

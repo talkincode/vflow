@@ -4,7 +4,7 @@ import {
   jwtVerify,
   type JSONWebKeySet,
 } from "jose";
-import type { ActorIdentity } from "@video-compose/protocol";
+import type { ActorIdentity } from "@vflow/protocol";
 
 export interface AccessAuthConfig {
   access?: { issuer: string; audience: string; jwks?: JSONWebKeySet };

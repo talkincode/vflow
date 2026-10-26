@@ -1,9 +1,10 @@
 import {
   DomainError,
   type DomainErrorCode,
-  VideoComposeDomainService,
-} from "@video-compose/domain";
-import type { ActorIdentity } from "@video-compose/protocol";
+  VFlowDomainService,
+} from "@vflow/domain";
+import type { ActorIdentity } from "@vflow/protocol";
+import { normalizeProtocolVersion } from "@vflow/protocol";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { type AccessAuthConfig, extractActorFromHeaders } from "./auth.ts";
@@ -58,10 +59,10 @@ function decodeBase64Bytes(base64: string): Uint8Array {
 }
 
 export function createApiApp(
-  domain: VideoComposeDomainService = new VideoComposeDomainService(),
+  domain: VFlowDomainService = new VFlowDomainService(),
   authConfig?: AccessAuthConfig,
   oauthStore: OAuthStore = new InMemoryOAuthStore(),
-): { app: Hono; domain: VideoComposeDomainService; oauthStore: OAuthStore } {
+): { app: Hono; domain: VFlowDomainService; oauthStore: OAuthStore } {
   const app = new Hono();
 
   const corsHeaders: Record<string, string> = {
@@ -223,9 +224,9 @@ export function createApiApp(
         resource: `${origin}/mcp`,
         authorization_servers: [origin],
         scopes_supported: [
-          "video-compose.read",
-          "video-compose.write",
-          "video-compose.all",
+          "vflow.read",
+          "vflow.write",
+          "vflow.all",
         ],
         bearer_methods_supported: ["header"],
       },
@@ -259,9 +260,9 @@ export function createApiApp(
         ],
         code_challenge_methods_supported: ["S256"],
         scopes_supported: [
-          "video-compose.read",
-          "video-compose.write",
-          "video-compose.all",
+          "vflow.read",
+          "vflow.write",
+          "vflow.all",
         ],
       },
       200,
@@ -315,7 +316,7 @@ export function createApiApp(
           ? (body.grant_types as string[])
           : ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
-      scope: String(body.scope || "video-compose.all"),
+      scope: String(body.scope || "vflow.all"),
       authMethod,
       secretHash,
       disabled: false,
@@ -392,7 +393,7 @@ export function createApiApp(
       clientId: client.id,
       redirectUri: finalRedirectUri,
       owner: actor.actorId,
-      scope: scope || client.scope || "video-compose.all",
+      scope: scope || client.scope || "vflow.all",
       state,
       resource,
       codeChallenge,
@@ -1267,10 +1268,7 @@ export function createApiApp(
         compositionId: c.req.param("compositionId"),
         revision: revParam ? Number(revParam) : undefined,
         format,
-        targetVersion:
-          c.req.query("targetVersion") === "video-compose/v1"
-            ? "video-compose/v1"
-            : undefined,
+        targetVersion: normalizeProtocolVersion(c.req.query("targetVersion")),
       });
       return c.json(exported);
     },

@@ -1,6 +1,43 @@
-export const PROTOCOL_VERSION = "video-compose/v1" as const;
-export const REFERENCE_PROTOCOL_VERSION = "video-compose/v2" as const;
+export const PROTOCOL_VERSION = "vflow/v1" as const;
+export const REFERENCE_PROTOCOL_VERSION = "vflow/v2" as const;
+
+/**
+ * Pre-rename wire identifiers. Documents and bundles written before the project
+ * was renamed to vflow still carry these values, so every read path accepts
+ * them. They are never emitted by new writes.
+ */
+export const LEGACY_PROTOCOL_VERSION = "video-compose/v1" as const;
+export const LEGACY_REFERENCE_PROTOCOL_VERSION = "video-compose/v2" as const;
+
 export type ProtocolVersion = typeof PROTOCOL_VERSION | typeof REFERENCE_PROTOCOL_VERSION;
+export type LegacyProtocolVersion =
+  | typeof LEGACY_PROTOCOL_VERSION
+  | typeof LEGACY_REFERENCE_PROTOCOL_VERSION;
+export type AcceptedProtocolVersion = ProtocolVersion | LegacyProtocolVersion;
+
+const LEGACY_PROTOCOL_VERSION_MAP: Readonly<Record<string, ProtocolVersion>> = {
+  [LEGACY_PROTOCOL_VERSION]: PROTOCOL_VERSION,
+  [LEGACY_REFERENCE_PROTOCOL_VERSION]: REFERENCE_PROTOCOL_VERSION,
+};
+
+/**
+ * Map an accepted (current or pre-rename) apiVersion onto its canonical vflow
+ * identifier. Returns undefined for unknown values.
+ */
+export function normalizeProtocolVersion(
+  value: unknown,
+): ProtocolVersion | undefined {
+  if (typeof value !== "string") return undefined;
+  if (value === PROTOCOL_VERSION || value === REFERENCE_PROTOCOL_VERSION) {
+    return value;
+  }
+  return LEGACY_PROTOCOL_VERSION_MAP[value];
+}
+
+/** True for the v2 (reference authoring) contract, including its pre-rename identifier. */
+export function isReferenceProtocolVersion(value: unknown): boolean {
+  return normalizeProtocolVersion(value) === REFERENCE_PROTOCOL_VERSION;
+}
 
 export type ProjectRole = "reader" | "writer";
 export type ActorKind = "human" | "agent";

@@ -1,14 +1,14 @@
-import type { VideoComposeClient } from "@video-compose/client";
+import type { VFlowClient } from "@vflow/client";
 import type {
   AssetRecord,
   SubjectRecord,
   TypedOperation,
-} from "@video-compose/domain";
+} from "@vflow/domain";
 import type {
   CompositionDocument,
   ShotDefinition,
   SubjectKind,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 import React, { useState } from "react";
 import { MediaPreview } from "./MediaPreview.tsx";
 import type { WorkbenchViewMode } from "./Workbench.tsx";
@@ -16,7 +16,7 @@ import type { WorkbenchViewMode } from "./Workbench.tsx";
 type Runner = (operation: () => Promise<void>) => Promise<void>;
 type Patcher = (operations: TypedOperation[], message: string) => Promise<void>;
 interface LibraryProps {
-  client: VideoComposeClient;
+  client: VFlowClient;
   projectId: string;
   activeShotId: string | null;
   activeShot?: ShotDefinition;

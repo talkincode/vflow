@@ -1,5 +1,5 @@
-import type { ActorIdentity } from "@video-compose/protocol";
-import type { VideoComposeDomainService } from "@video-compose/domain";
+import type { ActorIdentity } from "@vflow/protocol";
+import type { VFlowDomainService } from "@vflow/domain";
 import {
   handleMcpJsonRpc,
   LEGACY_MCP_VERSIONS,
@@ -22,7 +22,7 @@ const decodeHeader = (value: string | null) => {
 /** Streamable HTTP framing is shared by OAuth and Access-authenticated callers. */
 export async function mcpHttp(
   request: Request,
-  domain: VideoComposeDomainService,
+  domain: VFlowDomainService,
   actor: ActorIdentity | null,
   cors: Record<string, string>,
 ): Promise<Response> {
@@ -68,7 +68,7 @@ export async function mcpHttp(
         headers: {
           ...headers,
           "Content-Type": "application/json",
-          "WWW-Authenticate": `Bearer realm="video-compose", resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"`,
+          "WWW-Authenticate": `Bearer realm="vflow", resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"`,
         },
       },
     );

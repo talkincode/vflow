@@ -4,19 +4,19 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
-      "@video-compose/protocol": path.resolve(
+      "@vflow/protocol": path.resolve(
         import.meta.dirname,
         "packages/protocol/src/index.ts",
       ),
-      "@video-compose/domain": path.resolve(
+      "@vflow/domain": path.resolve(
         import.meta.dirname,
         "packages/domain/src/index.ts",
       ),
-      "@video-compose/client": path.resolve(
+      "@vflow/client": path.resolve(
         import.meta.dirname,
         "packages/client/src/index.ts",
       ),
-      "@video-compose/api": path.resolve(
+      "@vflow/api": path.resolve(
         import.meta.dirname,
         "apps/api/src/index.ts",
       ),

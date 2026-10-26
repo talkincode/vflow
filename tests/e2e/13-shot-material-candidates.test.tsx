@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import {
   PROTOCOL_VERSION,
   validateCompositionDocument,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Workbench } from "../../apps/web/src/Workbench.tsx";

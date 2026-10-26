@@ -1,5 +1,5 @@
 {
-  "name": "@video-compose/domain",
+  "name": "@vflow/domain",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,6 +11,6 @@
     "build": "tsc --noEmit"
   },
   "dependencies": {
-    "@video-compose/protocol": "*"
+    "@vflow/protocol": "*"
   }
 }

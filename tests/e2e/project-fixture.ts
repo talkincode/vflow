@@ -1,8 +1,8 @@
-import type { VideoComposeClient } from "@video-compose/client";
+import type { VFlowClient } from "@vflow/client";
 import {
   PROTOCOL_VERSION,
   type CompositionDocument,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 
 export function projectComposition(
   project: string,
@@ -35,7 +35,7 @@ export function projectComposition(
 
 // Add multiple compositions and distinct project scopes to the media workbench fixture.
 export async function seedProjectLibrary(
-  client: VideoComposeClient,
+  client: VFlowClient,
 ): Promise<void> {
   await client.createComposition({
     projectId: "demo",

@@ -5,9 +5,9 @@ import {
   StreamableHTTPClientTransport as ModernTransport,
 } from "@modelcontextprotocol/client";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { createApiApp, MCP_TOOLS_MANIFEST } from "@video-compose/api";
+import { createApiApp, MCP_TOOLS_MANIFEST } from "@vflow/api";
 import Ajv from "ajv";
-import { MATERIAL_DOCUMENT_JSON_SCHEMA } from "@video-compose/protocol";
+import { MATERIAL_DOCUMENT_JSON_SCHEMA } from "@vflow/protocol";
 import { TEST_AUTH_CONFIG, WRITER_AUTH } from "./auth-fixture.ts";
 
 function fixture() {

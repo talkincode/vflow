@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import type { VideoComposeClient } from "@video-compose/client";
+import type { VFlowClient } from "@vflow/client";
 import type {
   AssetRecord,
   SubjectRecord,
   TypedOperation,
-} from "@video-compose/domain";
+} from "@vflow/domain";
 import {
   AUTHORING_POLICY_VERSION,
   AUTHORING_PROMPTS,
@@ -21,7 +21,7 @@ import {
   type ReferencePurpose,
   type GenerationInputPacket,
   type GenerationEvidence,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 import { MediaPreview } from "./MediaPreview.tsx";
 
 const categories: Record<ReferencePack["category"], string> = {
@@ -79,7 +79,7 @@ function template(kind: string, owner?: ReferenceOwner): MaterialDocument {
   };
 }
 interface Props {
-  client: VideoComposeClient;
+  client: VFlowClient;
   projectId: string;
   composition: CompositionDocument;
   compositionRevision: number;
@@ -105,7 +105,7 @@ export function AuthoringPanel({
   patch,
 }: Props): React.ReactElement {
   const [workflow, setWorkflow] =
-    useState<Awaited<ReturnType<VideoComposeClient["getAuthoringWorkflow"]>>>();
+    useState<Awaited<ReturnType<VFlowClient["getAuthoringWorkflow"]>>>();
   const [records, setRecords] = useState<MaterialRecord[]>([]);
   const [current, setCurrent] = useState<MaterialRevision>();
   const [draft, setDraft] = useState("");

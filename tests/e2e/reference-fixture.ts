@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { VideoComposeClient } from "@video-compose/client";
+import type { VFlowClient } from "@vflow/client";
 import {
   AUTHORING_VERSION,
   AUTHORING_POLICY_VERSION,
@@ -10,10 +10,10 @@ import {
   type MaterialDocument,
   type CompositionDocument,
   type GenerationInputRequest,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 export const referenceProject = "reference-test";
 export async function referenceAssets(
-  client: VideoComposeClient,
+  client: VFlowClient,
   projectId = referenceProject,
 ) {
   const bytes = new Uint8Array(
@@ -80,7 +80,7 @@ export function referencePack(
   };
 }
 export async function approveMaterial(
-  client: VideoComposeClient,
+  client: VFlowClient,
   document: MaterialDocument,
   projectId = referenceProject,
 ) {
@@ -125,7 +125,7 @@ export async function approveMaterial(
   });
 }
 export async function seedReferences(
-  client: VideoComposeClient,
+  client: VFlowClient,
   authoringMode: "strict" | "legacy" = "strict",
 ) {
   const projectId = referenceProject;
@@ -231,7 +231,7 @@ export async function seedReferences(
     revision: r.revision,
   }));
   const document: CompositionDocument = {
-    apiVersion: "video-compose/v2",
+    apiVersion: "vflow/v2",
     id: "main",
     project: projectId,
     title: "关键镜头",

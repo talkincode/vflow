@@ -4,12 +4,13 @@ import {
   WORKFLOW_CONTEXT_SCHEMA,
   authoringRpc,
 } from "./authoring-mcp.ts";
-import type { WorkflowContext } from "@video-compose/protocol";
+import type { WorkflowContext } from "@vflow/protocol";
 import {
   DomainError,
   type TypedOperation,
-  type VideoComposeDomainService,
-} from "@video-compose/domain";
+  type VFlowDomainService,
+} from "@vflow/domain";
+import { normalizeProtocolVersion } from "@vflow/protocol";
 import type {
   ActorIdentity,
   CompositionDocument,
@@ -18,7 +19,7 @@ import type {
   ShotSubjectBinding,
   SubjectKind,
   SubjectVariant,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -704,8 +705,14 @@ for (const tool of MCP_TOOLS_MANIFEST) {
     };
   if (tool.name === "composition_export")
     tool.inputSchema.properties.targetVersion = {
-      enum: ["video-compose/v1", "video-compose/v2"],
-      description: "v2 material dependencies cannot be dropped for v1 readers.",
+      enum: [
+        "vflow/v1",
+        "vflow/v2",
+        "vflow/v1",
+        "vflow/v2",
+      ],
+      description:
+        "v2 material dependencies cannot be dropped for v1 readers. Pre-rename video-compose/* values stay accepted for a compatibility window.",
     };
   if (tool.name === "project_create")
     tool.inputSchema.properties.sharingMode = {
@@ -735,7 +742,7 @@ export const LEGACY_MCP_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
 
 /** Adapt wire results without changing shared domain operations or legacy payloads. */
 export async function handleMcpJsonRpc(
-  domain: VideoComposeDomainService,
+  domain: VFlowDomainService,
   actor: ActorIdentity | null,
   rpc: JsonRpcRequest,
 ): Promise<JsonRpcResponse> {
@@ -813,7 +820,7 @@ export async function handleMcpJsonRpc(
 }
 
 async function handleLegacyMcpJsonRpc(
-  domain: VideoComposeDomainService,
+  domain: VFlowDomainService,
   actor: ActorIdentity | null,
   rpc: JsonRpcRequest,
 ): Promise<JsonRpcResponse> {
@@ -851,7 +858,7 @@ async function handleLegacyMcpJsonRpc(
             AUTHORING_SERVER_INSTRUCTIONS +
             "\nAccounts and recycle bin: New projects are private to the authenticated account. Only the owner may explicitly grant/revoke project members or trash/restore a project. Reader/writer sharing includes nested assets and subjects; writers may trash/restore compositions. Never select an identity via headers or claim another account. Before trash/restore, read current lifecycleRevision and composition headRevision; submit baseRevision, expectedHeadRevision for compositions, and a stable operationId. Use trash_list for deleted items; restore the parent project before child compositions. Restoring a project does not restore separately deleted compositions. composition_restore restores content history, resource_restore restores recycle-bin state.",
           serverInfo: {
-            name: "video-compose-mcp",
+            name: "vflow-mcp",
             version: "0.1.0",
           },
           capabilities: {
@@ -971,7 +978,7 @@ async function handleLegacyMcpJsonRpc(
 }
 
 async function dispatchMcpTool(
-  domain: VideoComposeDomainService,
+  domain: VFlowDomainService,
   actor: ActorIdentity,
   toolName: string,
   args: Record<string, unknown>,
@@ -1116,10 +1123,7 @@ async function dispatchMcpTool(
 
     case "composition_export":
       return domain.exportCompositionBundle(actor, {
-        targetVersion:
-          args.targetVersion === "video-compose/v1"
-            ? "video-compose/v1"
-            : undefined,
+        targetVersion: normalizeProtocolVersion(args.targetVersion),
         projectId: String(args.projectId ?? ""),
         compositionId: String(args.compositionId ?? ""),
         revision: typeof args.revision === "number" ? args.revision : undefined,

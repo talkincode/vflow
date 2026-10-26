@@ -15,10 +15,10 @@ export const resourceKey = (projectId: string, entityId: string): string =>
 
 export interface DomainStateSnapshot {
   lifecycle: Record<string, import("./lifecycle.ts").LifecycleRecord>;
-  materials: Record<string, import("@video-compose/protocol").MaterialRecord>;
+  materials: Record<string, import("@vflow/protocol").MaterialRecord>;
   generationEvidence: Record<
     string,
-    import("@video-compose/protocol").GenerationEvidence
+    import("@vflow/protocol").GenerationEvidence
   >;
   projects: Record<string, ProjectRecord>;
   assets: Record<string, AssetRecord>;

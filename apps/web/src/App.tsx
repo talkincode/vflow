@@ -1,4 +1,4 @@
-import type { VideoComposeClient } from "@video-compose/client";
+import type { VFlowClient } from "@vflow/client";
 import React from "react";
 import {
   ProjectsPage,
@@ -14,7 +14,7 @@ function AppRoutes({
   client,
   pathname = window.location.pathname,
 }: {
-  client: VideoComposeClient;
+  client: VFlowClient;
   pathname?: string;
 }): React.ReactElement {
   const route = readRoute(pathname);
@@ -41,7 +41,7 @@ function AppRoutes({
 }
 
 export function App(props: {
-  client: VideoComposeClient;
+  client: VFlowClient;
   pathname?: string;
 }): React.ReactElement {
   return (

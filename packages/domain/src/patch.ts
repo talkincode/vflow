@@ -1,4 +1,5 @@
-import type { CompositionDocument } from "@video-compose/protocol";
+import type { CompositionDocument } from "@vflow/protocol";
+import { REFERENCE_PROTOCOL_VERSION } from "@vflow/protocol";
 import {
   type ChangeRecord,
   type ConflictDetail,
@@ -97,7 +98,7 @@ export function applyTypedOperations(
   for (const op of operations) {
     switch (op.op) {
       case "set_authoring":
-        doc.apiVersion = "video-compose/v2";
+        doc.apiVersion = REFERENCE_PROTOCOL_VERSION;
         doc.authoring = structuredClone(op.authoring);
         break;
       case "upsert_shot": {

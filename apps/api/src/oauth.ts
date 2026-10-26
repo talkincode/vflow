@@ -1,4 +1,4 @@
-import type { CloudflareD1DatabaseLike } from "@video-compose/domain";
+import type { CloudflareD1DatabaseLike } from "@vflow/domain";
 
 export interface McpClient {
   id: string;
@@ -474,7 +474,7 @@ export function renderConsentPage(params: {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>授权 MCP 客户端 - Video Compose</title>
+  <title>授权 MCP 客户端 - vflow</title>
   <style>
     :root {
       --bg: #0f1117;
@@ -584,7 +584,7 @@ export function renderConsentPage(params: {
 </head>
 <body>
   <div class="card">
-    <div class="eyebrow">Video Compose · MCP 授权</div>
+    <div class="eyebrow">vflow · MCP 授权</div>
     <h1>连接外部 Agent 客户端</h1>
     <p>客户端 <strong>${escapeHtml(params.clientName)}</strong> 正在请求通过 Model Context Protocol 访问您的项目与编排工作区。</p>
 
@@ -595,7 +595,7 @@ export function renderConsentPage(params: {
       </div>
       <div class="details-row">
         <span class="details-label">授权范围</span>
-        <span class="details-value">${escapeHtml(params.scope || "video-compose.all")}</span>
+        <span class="details-value">${escapeHtml(params.scope || "vflow.all")}</span>
       </div>
       <div class="details-row">
         <span class="details-label">协议版本</span>
@@ -621,7 +621,7 @@ export function renderSignInPage(loginUrl: string): string {
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <title>需要登录 - Video Compose</title>
+  <title>需要登录 - vflow</title>
   <style>
     body { background: #0f1117; color: #e6edf3; font-family: sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
     .card { background: #1a1d26; border: 1px solid #2e3446; border-radius: 12px; padding: 2rem; max-width: 400px; text-align: center; }

@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createApiApp } from "@video-compose/api";
+import { createApiApp } from "@vflow/api";
 import {
   createTestHarness,
   HUMAN_WRITER_HEADERS,

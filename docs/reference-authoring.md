@@ -1,6 +1,6 @@
 # 参考素材制作工作流
 
-本实现对应 [Issue #1](https://github.com/talkincode/video-compose/issues/1)。平台负责制作规则、资料版本、逐项审阅、来源、输入准备和使用证据。生成、裁切、OCR、视觉分析和视频播放验收由外部工具或人完成；没有新增模型执行器、付费任务或常驻服务。
+本实现对应 [Issue #1](https://github.com/talkincode/vflow/issues/1)。平台负责制作规则、资料版本、逐项审阅、来源、输入准备和使用证据。生成、裁切、OCR、视觉分析和视频播放验收由外部工具或人完成；没有新增模型执行器、付费任务或常驻服务。
 
 ## 从混合板到可用参考
 
@@ -47,7 +47,7 @@
 
 - `prompts/list/get`：七个制作/审阅/输入模板。`projectId/brief` 是必填字符串，`language` 可选 zh/en。未知模板、非法或缺失参数返回 `-32602`；项目访问仍检查 ACL。
 - `resources/list/read`：中英文公共规则与完整资料/输入 Schema。
-- `resources/templates/list`：`video-compose://projects/{projectId}/authoring/workflow`。读取具体项目策略、约束和资料概览时检查项目 reader 权限。
+- `resources/templates/list`：`vflow://projects/{projectId}/authoring/workflow`。读取具体项目策略、约束和资料概览时检查项目 reader 权限。
 - 仅支持 tools 的客户端先调用 `authoring_workflow_get`，取得相同完整规则、全部制作模板、必检项和 `workflowContext`。
 - `authoring_document_list/get/put/review/approve`：版本资料与逐项审阅。
 - `reference_plan_validate`：只读诊断，返回 `code/path/message/action`；不会自动补齐、审阅、批准或替图。
@@ -110,8 +110,9 @@ Web 客户端只在显式 `getAuthoringWorkflow` 成功后缓存 context，随�
 
 ## v1/v2、D1 迁移与回滚
 
-- `video-compose/v1` 继续读写历史结构。其 JSON Schema 保持 v1 常量且不接收 authoring。v2 有独立 `COMPOSITION_V2_JSON_SCHEMA`；`set_authoring` 是明确协议升级，不伪装成 v1 扩展字段。
-- 资料协议为 `video-compose/reference-workflow/v1`；场景、参考包和序列是类型化资料修订，编排 v2 的 `authoring.materials` 固定资料版本。
+- `vflow/v1` 继续读写历史结构。其 JSON Schema 保持 v1 常量且不接收 authoring。v2 有独立 `COMPOSITION_V2_JSON_SCHEMA`；`set_authoring` 是明确协议升级，不伪装成 v1 扩展字段。
+- 资料协议为 `vflow/reference-workflow/v1`；场景、参考包和序列是类型化资料修订，编排 v2 的 `authoring.materials` 固定资料版本。
+- 项目更名前写入的 `video-compose/v1`、`video-compose/v2`、`video-compose/reference-workflow/v1` 文档和 `video-compose://` MCP URI 仍在读取路径中被接受并归一化到 `vflow/*`；历史修订不就地改写，新写入不再产出旧标识。该兼容窗口的移除需要 D1 导出重写与本文的迁移/回滚流程。
 - 新建项目默认 strict；显式 `authoringMode: legacy` 只用于归档/兼容。它不表示旧图通过新规则，生成输入准备仍要求类型化、批准且固定的来源。旧 D1 项目缺少策略时保持 legacy。当前不提供隐式全项目升级或降级。
 - `0003_reference_authoring.sql` 只添加 `reference_documents/reference_evidence`，复用原 D1 事务、CAS 及 idempotency 表。记录整个不可变修订历史，不迁移或删除任何旧编排。
 - 先备份 D1/R2 并应用所有未执行迁移，再发布新 Worker。新 Worker 依赖新表，不能先发布后迁移。OAuth 的 `0002` 是工作树原有的独立功能，本功能不会代替它。

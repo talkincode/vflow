@@ -1,5 +1,5 @@
 import { generateKeyPair, exportJWK, SignJWT } from "jose";
-import type { AccessAuthConfig, WorkerEnv } from "@video-compose/api";
+import type { AccessAuthConfig, WorkerEnv } from "@vflow/api";
 const pair = await generateKeyPair("RS256");
 export const TEST_JWKS = {
   keys: [

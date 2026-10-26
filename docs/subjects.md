@@ -16,7 +16,7 @@ Subject and reference-pack data are logical, portable protocol constructs; D1/R2
 ## Example subject (illustrative YAML)
 
 ```yaml
-apiVersion: video-compose/v1
+apiVersion: vflow/v1
 subject:
   id: char-weila
   kind: character

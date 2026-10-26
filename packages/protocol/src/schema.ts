@@ -2,8 +2,8 @@ import { PROTOCOL_VERSION, REFERENCE_PROTOCOL_VERSION } from "./types.ts";
 
 export const COMPOSITION_JSON_SCHEMA = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://video-compose.talkincode.net/schemas/v1/composition.json",
-  title: "VideoComposeCompositionV1",
+  $id: "https://vflow.talkincode.net/schemas/v1/composition.json",
+  title: "VFlowCompositionV1",
   type: "object",
   required: ["apiVersion", "id", "project", "format", "sequence", "shots"],
   properties: {
@@ -150,8 +150,8 @@ export const COMPOSITION_JSON_SCHEMA = {
 
 export const COMPOSITION_V2_JSON_SCHEMA = {
   ...COMPOSITION_JSON_SCHEMA,
-  $id: "https://video-compose.talkincode.net/schemas/v2/composition.json",
-  title: "VideoComposeCompositionV2",
+  $id: "https://vflow.talkincode.net/schemas/v2/composition.json",
+  title: "VFlowCompositionV2",
   properties: {
     ...COMPOSITION_JSON_SCHEMA.properties,
     apiVersion: { const: REFERENCE_PROTOCOL_VERSION },
@@ -180,8 +180,8 @@ export const COMPOSITION_V2_JSON_SCHEMA = {
 
 export const SUBJECT_JSON_SCHEMA = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://video-compose.talkincode.net/schemas/v1/subject.json",
-  title: "VideoComposeSubjectV1",
+  $id: "https://vflow.talkincode.net/schemas/v1/subject.json",
+  title: "VFlowSubjectV1",
   type: "object",
   required: ["apiVersion", "subject"],
   properties: {

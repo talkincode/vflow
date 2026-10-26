@@ -9,13 +9,13 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import worker, { type WorkerEnv } from "@video-compose/api";
-import { VideoComposeClient } from "@video-compose/client";
+import worker, { type WorkerEnv } from "@vflow/api";
+import { VFlowClient } from "@vflow/client";
 import type {
   CloudflareD1DatabaseLike,
   CloudflareD1PreparedStatementLike,
   CloudflareR2BucketLike,
-} from "@video-compose/domain";
+} from "@vflow/domain";
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Workbench } from "../../apps/web/src/Workbench.tsx";
@@ -231,7 +231,7 @@ describe("E2E 09 — Cloudflare D1/R2 持久化绑定、Static Assets 与空库�
       MEDIA_BUCKET: createR2BucketAdapter(),
     };
     const client = (headers: Record<string, string>) =>
-      new VideoComposeClient({
+      new VFlowClient({
         baseUrl: "https://vflow.test",
         headers,
         fetchFn: (input, init) =>
@@ -322,15 +322,15 @@ describe("E2E 09 — Cloudflare D1/R2 持久化绑定、Static Assets 与空库�
 
     // 1. Verify non-API route delegates to Workers Static Assets binding
     const staticRes = await worker.fetch(
-      new Request("https://video-compose.talkincode.net/"),
+      new Request("https://vflow.talkincode.net/"),
       env,
     );
     expect(staticRes.status).toBe(200);
     expect(await staticRes.text()).toContain("Static Asset for /");
 
     // 2. Create client bound to stateless Worker fetch with D1 + R2 env
-    const writerClient = new VideoComposeClient({
-      baseUrl: "https://video-compose.talkincode.net",
+    const writerClient = new VFlowClient({
+      baseUrl: "https://vflow.talkincode.net",
       fetchFn: (input, init) =>
         worker.fetch(new Request(String(input), init), env),
       headers: HUMAN_WRITER_HEADERS,
@@ -423,14 +423,14 @@ describe("E2E 09 — Cloudflare D1/R2 持久化绑定、Static Assets 与空库�
     const r2 = createR2BucketAdapter();
     const env: WorkerEnv = { ...TEST_WORKER_AUTH, DB: d1, MEDIA_BUCKET: r2 };
 
-    const writerClient = new VideoComposeClient({
-      baseUrl: "https://video-compose.talkincode.net",
+    const writerClient = new VFlowClient({
+      baseUrl: "https://vflow.talkincode.net",
       fetchFn: (input, init) =>
         worker.fetch(new Request(String(input), init), env),
       headers: HUMAN_WRITER_HEADERS,
     });
-    const readerClient = new VideoComposeClient({
-      baseUrl: "https://video-compose.talkincode.net",
+    const readerClient = new VFlowClient({
+      baseUrl: "https://vflow.talkincode.net",
       fetchFn: (input, init) =>
         worker.fetch(new Request(String(input), init), env),
       headers: HUMAN_READER_HEADERS,
@@ -501,8 +501,8 @@ describe("E2E 09 — Cloudflare D1/R2 持久化绑定、Static Assets 与空库�
       MEDIA_BUCKET: createR2BucketAdapter(),
     };
     const client = () =>
-      new VideoComposeClient({
-        baseUrl: "https://video-compose.talkincode.net",
+      new VFlowClient({
+        baseUrl: "https://vflow.talkincode.net",
         headers: HUMAN_WRITER_HEADERS,
         fetchFn: (input, init) =>
           worker.fetch(new Request(String(input), init), env),

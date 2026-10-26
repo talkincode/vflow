@@ -1,4 +1,4 @@
-import type { VideoComposeDomainService } from "@video-compose/domain";
+import type { VFlowDomainService } from "@vflow/domain";
 import {
   AUTHORING_POLICY_VERSION,
   AUTHORING_PROMPTS,
@@ -8,7 +8,7 @@ import {
   GENERATION_INPUT_JSON_SCHEMA,
   renderAuthoringPrompt,
   type ActorIdentity,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 import type { JsonRpcRequest, McpToolDefinition } from "./mcp.ts";
 
 /** ChatGPT's tool importer requires a schema object in array.items.
@@ -246,7 +246,7 @@ export const AUTHORING_TOOLS: McpToolDefinition[] = [
 export const WORKFLOW_CONTEXT_SCHEMA = workflowContext;
 export { AUTHORING_SERVER_INSTRUCTIONS };
 export async function authoringRpc(
-  domain: VideoComposeDomainService,
+  domain: VFlowDomainService,
   actor: ActorIdentity,
   rpc: JsonRpcRequest,
 ): Promise<unknown | undefined> {
@@ -277,22 +277,22 @@ export async function authoringRpc(
   }
   const resources = [
     {
-      uri: "video-compose://authoring/rules/zh",
+      uri: "vflow://authoring/rules/zh",
       name: "参考素材制作规范",
       mimeType: "text/plain",
     },
     {
-      uri: "video-compose://authoring/rules/en",
+      uri: "vflow://authoring/rules/en",
       name: "Reference authoring rules",
       mimeType: "text/plain",
     },
     {
-      uri: "video-compose://authoring/schema/material",
+      uri: "vflow://authoring/schema/material",
       name: "Typed reference material schema",
       mimeType: "application/schema+json",
     },
     {
-      uri: "video-compose://authoring/schema/generation-input",
+      uri: "vflow://authoring/schema/generation-input",
       name: "Generation input schema",
       mimeType: "application/schema+json",
     },
@@ -303,14 +303,15 @@ export async function authoringRpc(
       resourceTemplates: [
         {
           uriTemplate:
-            "video-compose://projects/{projectId}/authoring/workflow",
+            "vflow://projects/{projectId}/authoring/workflow",
           name: "Authorized project authoring workflow",
           mimeType: "application/json",
         },
       ],
     };
   if (rpc.method === "resources/read") {
-    const uri = String(p.uri ?? "");
+    // Pre-rename MCP clients may still ask for video-compose:// URIs.
+    const uri = String(p.uri ?? "").replace(/^video-compose:\/\//, "vflow://");
     let text: string, mimeType: string;
     if (uri === resources[0].uri || uri === resources[1].uri) {
       text = AUTHORING_RULES[uri.endsWith("/en") ? "en" : "zh"];
@@ -324,7 +325,7 @@ export async function authoringRpc(
       mimeType = "application/schema+json";
     } else {
       const match =
-        /^video-compose:\/\/projects\/([^/]+)\/authoring\/workflow$/.exec(uri);
+        /^vflow:\/\/projects\/([^/]+)\/authoring\/workflow$/.exec(uri);
       if (!match) throw new Error("Unknown authoring resource URI.");
       text = JSON.stringify(
         await domain.authoring.workflow(actor, decodeURIComponent(match[1])),

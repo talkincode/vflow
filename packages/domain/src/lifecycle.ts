@@ -1,4 +1,4 @@
-import { canonicalizeJson, type ActorIdentity } from "@video-compose/protocol";
+import { canonicalizeJson, type ActorIdentity } from "@vflow/protocol";
 import { DomainError } from "./types.ts";
 import {
   resourceKey,

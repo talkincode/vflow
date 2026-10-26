@@ -9,7 +9,7 @@ test("project library, composition selection, direct URLs and browser history wo
 }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "从一个项目开始" }),
+    page.getByRole("heading", { name: "你的创作项目" }),
   ).toBeVisible();
   await expect(page.locator(".project-card")).toHaveCount(3);
   await page.getByLabel("搜索项目").fill("城市");

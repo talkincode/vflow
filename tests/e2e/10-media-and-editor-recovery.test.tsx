@@ -47,7 +47,7 @@ async function setup() {
         );
         expect(
           screen
-            .getByTestId("video-compose-workbench")
+            .getByTestId("vflow-workbench")
             .getAttribute("aria-busy"),
         ).toBe("false");
       }),
@@ -56,9 +56,9 @@ async function setup() {
 describe("E2E 10 — 真实媒体读取与草稿恢复", () => {
   it("serves authorized full/partial media, rejects outsiders and invalid ranges, and recovers after a missing object", async () => {
     const { app, domain } = createApiApp(undefined, TEST_AUTH_CONFIG);
-    const { VideoComposeClient } = await import("@video-compose/client");
-    const client = new VideoComposeClient({
-      baseUrl: "https://video-compose.talkincode.net",
+    const { VFlowClient } = await import("@vflow/client");
+    const client = new VFlowClient({
+      baseUrl: "https://vflow.talkincode.net",
       fetchFn: async (input, init) =>
         app.fetch(new Request(String(input), init)),
       headers: HUMAN_WRITER_HEADERS,

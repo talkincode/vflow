@@ -4,7 +4,7 @@ import type {
   ProjectRole,
   SubjectKind,
   SubjectSnapshot,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 import {
   resourceKey,
   createEmptyStateSnapshot,

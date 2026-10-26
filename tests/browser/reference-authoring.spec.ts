@@ -174,7 +174,7 @@ test("reference wizard builds a classified draft and preserves invalid JSON afte
   ).toBeVisible();
   page.once("dialog", (dialog) => dialog.dismiss());
   await page
-    .getByRole("link", { name: "Video Compose 首页", exact: true })
+    .getByRole("link", { name: "vflow 首页", exact: true })
     .click();
   await expect(page).toHaveURL(/reference-test\/compositions\/main$/);
   await expect(editor).toHaveValue('{"broken":');

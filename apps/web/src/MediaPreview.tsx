@@ -1,4 +1,4 @@
-import type { AssetRecord } from "@video-compose/domain";
+import type { AssetRecord } from "@vflow/domain";
 import React, { useState } from "react";
 
 export function MediaPreview({

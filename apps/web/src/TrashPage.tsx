@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import type { VideoComposeClient } from "@video-compose/client";
-import type { TrashItem } from "@video-compose/domain";
+import type { VFlowClient } from "@vflow/client";
+import type { TrashItem } from "@vflow/domain";
 import { AccountMenu } from "./AccountMenu.tsx";
 export function TrashPage({
   client,
 }: {
-  client: VideoComposeClient;
+  client: VFlowClient;
 }): React.ReactElement {
   const [items, setItems] = useState<TrashItem[] | null>(null),
     [error, setError] = useState(""),
@@ -23,7 +23,7 @@ export function TrashPage({
     <div className="project-shell">
       <header className="app-header project-header">
         <a className="brand" href="/">
-          Video Compose
+          vflow
         </a>
         <nav aria-label="项目导航">
           <a href="/">全部项目</a>

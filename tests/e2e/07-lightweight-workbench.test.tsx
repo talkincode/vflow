@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { PROTOCOL_VERSION } from "@video-compose/protocol";
+import { PROTOCOL_VERSION } from "@vflow/protocol";
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Workbench } from "../../apps/web/src/Workbench.tsx";

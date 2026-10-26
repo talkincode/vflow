@@ -7,9 +7,9 @@
 - Shared `packages/protocol` defines JSON Schema, canonical JSON, parsing, compatibility policy and semantic invariants. YAML is an interchange form only.
 - MCP and HTTP/GUI call the same domain service. Do not build separate write paths.
 - No media generation, transcoding, FFmpeg runtime, publication or execution orchestrator in this service.
-- **Hosting decision:** only Cloudflare Workers. Custom Domain under Cloudflare-managed `talkincode.net`, planned hostname `video-compose.talkincode.net`; do not claim it is live before verification.
+- **Hosting decision:** only Cloudflare Workers. Custom Domain under Cloudflare-managed `talkincode.net`, canonical hostname `vflow.talkincode.net` with `video-compose.talkincode.net` retained as a compatibility alias; verify actual routing before claiming either is live.
 - **SSO decision:** Cloudflare Access (Zero Trust) gates browser UI, REST and MCP. Human users authenticate through configured IdP; headless Agents must use an explicitly permitted non-interactive Access identity mechanism. Worker domain authorization remains mandatory.
-- **Delivery decision:** GitHub repository `talkincode/video-compose` main -> Cloudflare Workers Builds GitHub integration by default; GitHub Actions + Wrangler is an alternative, never a simultaneous second production deployer. Deployment requirements are documented separately in [deployment.md](deployment.md).
+- **Delivery decision:** GitHub repository `talkincode/vflow` main -> Cloudflare Workers Builds GitHub integration by default; GitHub Actions + Wrangler is an alternative, never a simultaneous second production deployer. Deployment requirements are documented separately in [deployment.md](deployment.md).
 
 ## Data Model
 Project -> many Compositions; Project -> many Assets; Project -> many Subjects (character/prop); Project -> Member permissions (`reader` | `writer`).
@@ -51,6 +51,8 @@ Project export must contain all referenced subject-revision manifests and stable
 Detailed draft: [subject/reference model](subjects.md).
 
 ## Workbench edit state
+
+The visual adapter uses a light studio workspace: warm neutral canvas, white editing surfaces, dark media previews and a teal primary action. Each workspace tab has a local SVG icon, an explicit accessible name and a visible purpose description; color is never the sole identifier. Shot selection, permissions and unsaved/saved state remain explicit. Small screens retain wrapping navigation, keyboard tab controls and per-shot drafts. This presentation changes no domain contract; acceptance covers `tests/browser/workbench.spec.ts` (studio navigation, save-state visibility, draft retention, roles and responsive layouts).
 
 The browser entry point is the project library at `/`. `/projects/:projectId` presents the authorized project overview and composition list; `/projects/:projectId/compositions/:compositionId` opens that composition directly. IDs are URL-encoded. Navigation uses ordinary links and native browser history, so each workbench opens in a fresh document and cannot retain another project's shot drafts, subject library or assets. Existing before-unload protection warns before leaving an edited workbench. Invalid or unauthorized links offer a return to the project library; they never initialize a guessed project or composition.
 

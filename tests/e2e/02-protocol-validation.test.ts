@@ -8,7 +8,7 @@ import {
   subjectRevisionKey,
   validateCompositionDocument,
   validateSubjectManifest,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 import { describe, expect, it } from "vitest";
 
 describe("E2E 02 — 声明式协议与验证 (Declarative Protocol & Validation)", () => {
@@ -131,5 +131,38 @@ describe("E2E 02 — 声明式协议与验证 (Declarative Protocol & Validation
 
     // Validator never mutates input
     expect(JSON.stringify(cyclicInput)).toBe(frozenCopy);
+  });
+
+  it("Rename compatibility: reads pre-rename video-compose/* documents and normalizes them to vflow/*", () => {
+    const legacyComposition = {
+      ...structuredClone(SAMPLE_COMPOSITION),
+      apiVersion: "video-compose/v1",
+    };
+    const compositionResult = validateCompositionDocument(legacyComposition);
+    expect(compositionResult.ok).toBe(true);
+    if (compositionResult.ok) {
+      expect(compositionResult.value.apiVersion).toBe(PROTOCOL_VERSION);
+    }
+
+    const legacySubject = {
+      ...structuredClone(SAMPLE_CHARACTER_SUBJECT),
+      apiVersion: "video-compose/v1",
+    };
+    const subjectResult = validateSubjectManifest(legacySubject);
+    expect(subjectResult.ok).toBe(true);
+    if (subjectResult.ok) {
+      expect(subjectResult.value.apiVersion).toBe(PROTOCOL_VERSION);
+    }
+
+    const unknownFuture = validateCompositionDocument({
+      ...structuredClone(SAMPLE_COMPOSITION),
+      apiVersion: "video-compose/v9",
+    });
+    expect(unknownFuture.ok).toBe(false);
+    if (!unknownFuture.ok) {
+      expect(unknownFuture.errors.map((e) => e.code)).toContain(
+        "UNSUPPORTED_API_VERSION",
+      );
+    }
   });
 });

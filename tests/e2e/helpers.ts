@@ -1,6 +1,6 @@
-import { createApiApp } from "@video-compose/api";
-import { VideoComposeClient } from "@video-compose/client";
-import type { VideoComposeDomainService } from "@video-compose/domain";
+import { createApiApp } from "@vflow/api";
+import { VFlowClient } from "@vflow/client";
+import type { VFlowDomainService } from "@vflow/domain";
 
 import { WRITER_AUTH, READER_AUTH, OUTSIDER_AUTH, TEST_AUTH_CONFIG } from "./auth-fixture.ts";
 export const HUMAN_WRITER_HEADERS=WRITER_AUTH;
@@ -26,14 +26,14 @@ export const AGENT_READER_HEADERS = {
 };
 
 export function createTestHarness(): {
-  domain: VideoComposeDomainService;
-  writerClient: VideoComposeClient;
-  readerClient: VideoComposeClient;
-  outsiderClient: VideoComposeClient;
-  anonymousClient: VideoComposeClient;
-  agentAClient: VideoComposeClient;
-  agentBClient: VideoComposeClient;
-  agentReaderClient: VideoComposeClient;
+  domain: VFlowDomainService;
+  writerClient: VFlowClient;
+  readerClient: VFlowClient;
+  outsiderClient: VFlowClient;
+  anonymousClient: VFlowClient;
+  agentAClient: VFlowClient;
+  agentBClient: VFlowClient;
+  agentReaderClient: VFlowClient;
 } {
   const { app, domain } = createApiApp(undefined, TEST_AUTH_CONFIG);
 
@@ -45,8 +45,8 @@ export function createTestHarness(): {
     return app.fetch(req);
   };
 
-  const baseClient = new VideoComposeClient({
-    baseUrl: "https://video-compose.talkincode.net",
+  const baseClient = new VFlowClient({
+    baseUrl: "https://vflow.talkincode.net",
     fetchFn,
   });
 

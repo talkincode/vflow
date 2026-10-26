@@ -16,7 +16,7 @@ import {
   validateMaterial,
 } from "./authoring.ts";
 import { imageDimensions } from "./image-metadata.ts";
-import type { WorkflowContext } from "@video-compose/protocol";
+import type { WorkflowContext } from "@vflow/protocol";
 import {
   canonicalizeJson,
   type ActorIdentity,
@@ -24,6 +24,9 @@ import {
   type CompositionDocument,
   parseBundleInterchange,
   type PortableCompositionBundle,
+  PROTOCOL_VERSION,
+  type ProtocolVersion,
+  isReferenceProtocolVersion,
   type ProjectRole,
   type ReferencePackEntry,
   type RevisionStatus,
@@ -36,7 +39,7 @@ import {
   materialPins,
   validateCompositionDocument,
   validateSubjectSnapshot,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 import {
   applyTypedOperations,
   computeOperationPaths,
@@ -70,7 +73,7 @@ function compositeKey(projectId: string, entityId: string): string {
   return resourceKey(projectId, entityId);
 }
 
-export class VideoComposeDomainService {
+export class VFlowDomainService {
   readonly store: DomainStore;
   readonly lifecycle: LifecycleService;
   readonly authoring: ReferenceAuthoringService;
@@ -156,7 +159,7 @@ export class VideoComposeDomainService {
     availableSubjects: Map<string, SubjectSnapshot>;
     availableMaterials: Map<
       string,
-      import("@video-compose/protocol").MaterialRevision
+      import("@vflow/protocol").MaterialRevision
     >;
   } {
     const availableAssets = new Set<string>();
@@ -177,7 +180,7 @@ export class VideoComposeDomainService {
 
     const availableMaterials = new Map<
       string,
-      import("@video-compose/protocol").MaterialRevision
+      import("@vflow/protocol").MaterialRevision
     >();
     for (const record of Object.values(state.materials))
       if (record.projectId === projectId)
@@ -2120,7 +2123,7 @@ export class VideoComposeDomainService {
       compositionId: string;
       revision?: number;
       format: "json" | "yaml";
-      targetVersion?: "video-compose/v1" | "video-compose/v2";
+      targetVersion?: ProtocolVersion;
     },
   ): Promise<{ bundle: PortableCompositionBundle; serialized: string }> {
     const state = await this.store.readState();
@@ -2145,7 +2148,7 @@ export class VideoComposeDomainService {
 
     const original = revRecord.document;
     if (
-      input.targetVersion === "video-compose/v1" &&
+      input.targetVersion === PROTOCOL_VERSION &&
       original.authoring !== undefined
     )
       throw new DomainError(
@@ -2159,14 +2162,14 @@ export class VideoComposeDomainService {
     };
     const referencedMaterials = new Map<
       string,
-      import("@video-compose/protocol").MaterialRevision
+      import("@vflow/protocol").MaterialRevision
     >();
     const referencedAssetIds = new Set<string>();
     const compositionBaselines: NonNullable<
       PortableCompositionBundle["dependencies"]["compositionBaselines"]
     > = [];
     const collectMaterial = (
-      pin: import("@video-compose/protocol").RevisionPin,
+      pin: import("@vflow/protocol").RevisionPin,
     ): void => {
       const key = `${pin.id}@${pin.revision}`;
       if (referencedMaterials.has(key)) return;
@@ -2317,7 +2320,7 @@ export class VideoComposeDomainService {
       dependencies: {
         subjects: Array.from(referencedSubjects.values()),
         assets: assetsManifest,
-        ...(doc.apiVersion === "video-compose/v2"
+        ...(isReferenceProtocolVersion(doc.apiVersion)
           ? {
               materials: Array.from(referencedMaterials.values()),
               compositionBaselines,
@@ -2571,9 +2574,10 @@ export class VideoComposeDomainService {
       const now = new Date().toISOString();
       const existingComp = draft.compositions[cKey];
       if (
-        existingComp?.revisions[existingComp.headRevision].document
-          .apiVersion === "video-compose/v2" &&
-        validated.value.apiVersion === "video-compose/v1"
+        isReferenceProtocolVersion(
+          existingComp?.revisions[existingComp.headRevision].document.apiVersion,
+        ) &&
+        validated.value.apiVersion === PROTOCOL_VERSION
       )
         throw new DomainError(
           "UNREPRESENTABLE_IN_V1",

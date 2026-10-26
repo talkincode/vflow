@@ -1,5 +1,5 @@
 import { TEST_AUTH_CONFIG } from "./auth-fixture.ts";
-import { createApiApp } from "@video-compose/api";
+import { createApiApp } from "@vflow/api";
 import { describe, expect, it } from "vitest";
 import { HUMAN_READER_HEADERS, HUMAN_WRITER_HEADERS } from "./helpers.ts";
 
@@ -28,7 +28,7 @@ async function createPkcePair(): Promise<{ verifier: string; challenge: string }
 describe("E2E 12 — MCP OAuth 2.1 (RFC 9728, RFC 8414, RFC 7591, PKCE S256)", () => {
   it("uses the requested vflow origin for OAuth discovery and Bearer challenges while preserving the old hostname", async () => {
     const { app } = createApiApp(undefined,TEST_AUTH_CONFIG);
-    for (const origin of ["https://vflow.talkincode.net", "https://video-compose.talkincode.net"]) {
+    for (const origin of ["https://vflow.talkincode.net", "https://vflow.talkincode.net"]) {
       const metadata = await app.request(`${origin}/.well-known/oauth-authorization-server`);
       expect(await metadata.json()).toMatchObject({ issuer: origin, authorization_endpoint: `${origin}/oauth/authorize`, token_endpoint: `${origin}/oauth/token`, registration_endpoint: `${origin}/oauth/register` });
       const resource = await app.request(`${origin}/.well-known/oauth-protected-resource/mcp`);
@@ -54,7 +54,7 @@ describe("E2E 12 — MCP OAuth 2.1 (RFC 9728, RFC 8414, RFC 7591, PKCE S256)", (
     });
     expect(initialMcpRes.status).toBe(401);
     const wwwAuth = initialMcpRes.headers.get("WWW-Authenticate");
-    expect(wwwAuth).toContain("Bearer realm=\"video-compose\"");
+    expect(wwwAuth).toContain("Bearer realm=\"vflow\"");
     expect(wwwAuth).toContain("resource_metadata=");
 
     // 2. Discover OAuth Protected Resource Metadata (RFC 9728)
@@ -84,7 +84,7 @@ describe("E2E 12 — MCP OAuth 2.1 (RFC 9728, RFC 8414, RFC 7591, PKCE S256)", (
         redirect_uris: ["http://localhost:8989/oauth/callback"],
         grant_types: ["authorization_code", "refresh_token"],
         token_endpoint_auth_method: "none",
-        scope: "video-compose.all",
+        scope: "vflow.all",
       }),
     });
     expect(registerRes.status).toBe(201);

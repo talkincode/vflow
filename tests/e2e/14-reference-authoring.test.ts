@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { handleMcpJsonRpc } from "@video-compose/api";
+import { handleMcpJsonRpc } from "@vflow/api";
 import {
   AUTHORING_POLICY_VERSION,
   AUTHORING_PROMPTS,
   AUTHORING_RULES,
   AUTHORING_VERSION,
   MATERIAL_DOCUMENT_JSON_SCHEMA,
+  MaterialDocumentSchema,
   REQUIRED_REVIEW_CHECKS,
   renderAuthoringPrompt,
   type ReferencePack,
   type StoryboardSequence,
   type MaterialDocument,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 import { createTestHarness } from "./helpers.ts";
 import {
   referenceAssets,
@@ -54,13 +55,13 @@ describe("E2E 14 — reference authoring rules, exact inputs and portability", (
     });
     expect((await invoke(h.domain, "resources/list")).result).toMatchObject({
       resources: expect.arrayContaining([
-        expect.objectContaining({ uri: "video-compose://authoring/rules/zh" }),
+        expect.objectContaining({ uri: "vflow://authoring/rules/zh" }),
       ]),
     });
     expect(
       (
         await invoke(h.domain, "resources/read", {
-          uri: `video-compose://projects/${projectId}/authoring/workflow`,
+          uri: `vflow://projects/${projectId}/authoring/workflow`,
         })
       ).result,
     ).toBeDefined();
@@ -146,7 +147,7 @@ describe("E2E 14 — reference authoring rules, exact inputs and portability", (
     await expect(
       h.writerClient.callMcpTool("composition_create", {
         projectId,
-        document: { apiVersion: "video-compose/v1" },
+        document: { apiVersion: "vflow/v1" },
       }),
     ).rejects.toMatchObject({ code: "WORKFLOW_CONTEXT_REQUIRED" });
   });
@@ -191,7 +192,7 @@ describe("E2E 14 — reference authoring rules, exact inputs and portability", (
         await invoke(
           h.domain,
           "resources/read",
-          { uri: `video-compose://projects/${projectId}/authoring/workflow` },
+          { uri: `vflow://projects/${projectId}/authoring/workflow` },
           { actorId: "outsider", actorKind: "human" },
         )
       ).error?.data,
@@ -523,14 +524,14 @@ describe("E2E 14 — reference authoring rules, exact inputs and portability", (
       compositionId: "main",
       format: "json",
     });
-    expect(exported.bundle.apiVersion).toBe("video-compose/v2");
+    expect(exported.bundle.apiVersion).toBe("vflow/v2");
     expect(exported.bundle.dependencies.compositionBaselines).toHaveLength(1);
     await expect(
       h.writerClient.exportCompositionBundle({
         projectId,
         compositionId: "main",
         format: "json",
-        targetVersion: "video-compose/v1",
+        targetVersion: "vflow/v1",
       }),
     ).rejects.toMatchObject({ code: "UNREPRESENTABLE_IN_V1" });
     await h.writerClient.createProject({ id: "restored", name: "恢复" });
@@ -614,5 +615,69 @@ describe("E2E 14 — reference authoring rules, exact inputs and portability", (
     expect(
       (await h.writerClient.getComposition(projectId, "main")).headRevision,
     ).toBe(2);
+
+    // Stored v2 revisions written before the rename keep their identifier and
+    // must still export complete material dependencies.
+    await h.domain.store.runInTransaction(
+      "legacy-version-fixture",
+      (draft) => {
+        const stored = draft.compositions[JSON.stringify([projectId, "main"])];
+        const revision = stored?.revisions[2];
+        if (revision) {
+          (revision.document as { apiVersion: string }).apiVersion =
+            "video-compose/v2";
+        }
+      },
+    );
+    const legacyExport = await h.writerClient.exportCompositionBundle({
+      projectId,
+      compositionId: "main",
+      format: "json",
+    });
+    expect(legacyExport.bundle.apiVersion).toBe("video-compose/v2");
+    expect(
+      legacyExport.bundle.dependencies.materials?.length,
+    ).toBeGreaterThan(0);
+    expect(legacyExport.bundle.dependencies.compositionBaselines).toHaveLength(1);
+  });
+
+  it("Rename compatibility: accepts pre-rename material schemaVersion and MCP resource URIs", async () => {
+    const h = createTestHarness();
+    await h.writerClient.createProject({ id: projectId, name: "迁移兼容" });
+    const workflow = await h.writerClient.callMcpTool<{
+      workflowContext: unknown;
+    }>("authoring_workflow_get", { projectId });
+    const legacyScene = {
+      schemaVersion: "video-compose/reference-workflow/v1",
+      kind: "scene" as const,
+      id: "legacy-bridge",
+      title: "旧桥",
+      geometry: "固定三拱",
+      anchors: { rail: { description: "石栏", supportSurface: true } },
+      environmentVariants: {
+        night: { time: "夜", weather: "雾", state: "正常水位" },
+      },
+    };
+    expect(MaterialDocumentSchema.safeParse(legacyScene).success).toBe(true);
+    expect(
+      await h.writerClient.callMcpTool("authoring_document_put", {
+        projectId,
+        document: legacyScene,
+        baseRevision: 0,
+        operationId: "legacy-scene-put",
+        workflowContext: workflow.workflowContext,
+      }),
+    ).toMatchObject({ revision: 1, status: "candidate" });
+
+    const legacyRead = await invoke(h.domain, "resources/read", {
+      uri: "video-compose://authoring/rules/zh",
+    });
+    const contents = (
+      legacyRead.result as { contents: Array<{ uri: string; text: string }> }
+    ).contents;
+    expect(contents[0]).toMatchObject({
+      uri: "vflow://authoring/rules/zh",
+      text: AUTHORING_RULES.zh,
+    });
   });
 });

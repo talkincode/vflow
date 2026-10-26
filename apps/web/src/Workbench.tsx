@@ -1,18 +1,19 @@
-import type { VideoComposeClient } from "@video-compose/client";
+import type { VFlowClient } from "@vflow/client";
 import {
   type AssetRecord,
   type CompositionRevisionRecord,
   DomainError,
   type SubjectRecord,
   type TypedOperation,
-} from "@video-compose/domain";
+} from "@vflow/domain";
 import {
   PROTOCOL_VERSION,
   type ShotDefinition,
   serializeCompositionYaml,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AccountMenu } from "./AccountMenu.tsx";
+import { WorkspaceIcon } from "./WorkspaceIcon.tsx";
 import { MediaPreview } from "./MediaPreview.tsx";
 import {
   AssetLibrary,
@@ -29,7 +30,7 @@ const AuthoringPanel = React.lazy(() =>
 
 export type WorkbenchViewMode = "grid" | "list" | "topology";
 export interface WorkbenchProps {
-  client: VideoComposeClient;
+  client: VFlowClient;
   projectId: string;
   compositionId: string;
   initialView?: WorkbenchViewMode;
@@ -37,7 +38,7 @@ export interface WorkbenchProps {
   allowBootstrap?: boolean;
 }
 type CompositionData = Awaited<
-  ReturnType<VideoComposeClient["getComposition"]>
+  ReturnType<VFlowClient["getComposition"]>
 >;
 type WorkspaceTab =
   "shots" | "assets" | "subjects" | "authoring" | "history" | "source";
@@ -498,8 +499,8 @@ export function Workbench({
   if (!doc || !data)
     return (
       <div className="welcome">
-        <img src="/logo.svg" alt="Video Compose" width="48" height="48" />
-        <h1>Video Compose</h1>
+        <img src="/logo.svg" alt="vflow" width="48" height="48" />
+        <h1>vflow</h1>
         {navigation}
         {bootstrap ? (
           <div data-testid="empty-workspace-bootstrap">
@@ -568,24 +569,25 @@ export function Workbench({
         : [...previous, id],
     );
   const tabs = [
-    ["shots", "分镜"],
-    ["assets", "素材"],
-    ["subjects", "角色与道具"],
-    ["authoring", "参考制作"],
-    ["history", "协作与历史"],
-    ["source", "协议"],
+    ["shots", "分镜", "安排镜头，编辑提示词与画面"],
+    ["assets", "素材", "管理项目共享的图片、视频与音频"],
+    ["subjects", "角色与道具", "维护身份设定与固定版本的参考图"],
+    ["authoring", "参考制作", "整理参考资料、逐项审阅与准备输入"],
+    ["history", "协作与历史", "查看修订、审阅提案与恢复历史"],
+    ["source", "协议", "查看与交换可移植的编排定义"],
   ] as const;
+  const activeWorkspace = tabs.find(([value]) => value === tab) ?? tabs[0];
   return (
     <div
       className={`workbench ${focus ? "focus-mode" : ""} ${!navigationOpen ? "navigation-hidden" : ""}`}
       aria-busy={pending}
-      data-testid="video-compose-workbench"
+      data-testid="vflow-workbench"
     >
       <header className="app-header">
-        <a className="brand" href="/" aria-label="Video Compose 首页">
+        <a className="brand" href="/" aria-label="vflow 首页">
           <img src="/logo.svg" alt="" width="34" height="34" />
           <span>
-            Video Compose<small>作品编排与协作</small>
+            vflow<small>作品编排与协作</small>
           </span>
         </a>
         <div className="composition-heading">
@@ -600,7 +602,9 @@ export function Workbench({
           <span className="badge" data-testid="composition-revision">
             修订 #{head}
           </span>
-          <span>{canWrite ? "可编辑" : "只读"}</span>
+          <span className={`permission-status ${canWrite ? "editable" : "readonly"}`}>
+            {canWrite ? "可编辑" : "只读"}
+          </span>
           <span>
             {doc.sequence.length} 镜头 · {(totalFrames / fps).toFixed(1)} 秒
           </span>
@@ -628,7 +632,7 @@ export function Workbench({
       <div className="workspace">
         <aside className="shot-sidebar" aria-label="镜头导航">
           <div className="sidebar-title">
-            <strong>镜头导航</strong>
+            <strong>镜头导航 <small>{doc.sequence.length}</small></strong>
             <button
               data-testid="btn-add-shot"
               onClick={() => void run(addShot)}
@@ -693,7 +697,8 @@ export function Workbench({
               <p className="empty-state">没有匹配的镜头</p>
             )}
           </div>
-          <div className="sidebar-footer">
+          <div className={`sidebar-footer ${dirtyCount ? "has-drafts" : "saved"}`}>
+            <span className="save-indicator" aria-hidden="true" />
             {dirtyCount ? `${dirtyCount} 个镜头有未保存草稿` : "所有镜头已保存"}
             <small>草稿保留在当前页面，离开前请保存。</small>
           </div>
@@ -728,17 +733,21 @@ export function Workbench({
               buttons[next].focus();
             }}
           >
-            {tabs.map(([value, label]) => (
+            {tabs.map(([value, label, description]) => (
               <button
                 key={value}
                 role="tab"
+                aria-label={label}
+                title={description}
+                data-workspace={value}
                 id={`workspace-${value}`}
                 aria-controls={`workspace-panel-${value}`}
                 aria-selected={tab === value}
                 tabIndex={tab === value ? 0 : -1}
                 onClick={() => setTab(value)}
               >
-                {label}
+                <WorkspaceIcon name={value} />
+                <span>{label}</span>
               </button>
             ))}
             <button
@@ -750,6 +759,18 @@ export function Workbench({
             </button>
           </div>
           <div className="workspace-content">
+            <div className="workspace-context" data-testid="workspace-context">
+              <span className={`workspace-context-icon context-${tab}`}>
+                <WorkspaceIcon name={activeWorkspace[0]} />
+              </span>
+              <div>
+                <strong>{activeWorkspace[1]}</strong>
+                <p>{activeWorkspace[2]}</p>
+              </div>
+              <span className="workspace-context-meta">
+                {tab === "shots" ? `${doc.sequence.length} 个镜头 · ${(totalFrames / fps).toFixed(1)} 秒` : "项目共享工作区"}
+              </span>
+            </div>
             <section
               role="tabpanel"
               id="workspace-panel-shots"
@@ -769,6 +790,7 @@ export function Workbench({
                         {doc.sequence.length} · {activeShotId}
                       </span>
                       <h2>分镜工作页</h2>
+                      <p className="editor-purpose">左侧核对画面与参考，右侧编辑当前镜头。</p>
                     </div>
                     <div className="toolbar">
                       <button

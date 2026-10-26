@@ -1,11 +1,11 @@
-# Video Compose
+# vflow
 
 **Agent-native declarative video composition protocol and collaborative asset workspace.**
 
 [中文](#项目定位) · [Roadmap](docs/roadmap.md) · [Architecture](docs/architecture.md) · [Deployment](docs/deployment.md) · [Protocol draft](docs/protocol.md) · [Agent rules](AGENTS.md)
 
 ## 项目定位
-Video Compose 面向人与多个 Agent 共创视频作品。项目记录可移植的分镜结构、时间线、Prompt、参考图片/视频、音频/视频资产、候选输出及版本变更；外部 Agent 自选生成工具，并通过标准 MCP/HTTP 接口修改编排和上传资产。
+vflow 面向人与多个 Agent 共创视频作品。项目原名 Video Compose；包名、协议标识和 canonical 域名已统一为 `vflow`，历史 `video-compose/*` 文档与 MCP URI 仍可读取，新写入只使用 `vflow/*`。项目记录可移植的分镜结构、时间线、Prompt、参考图片/视频、音频/视频资产、候选输出及版本变更；外部 Agent 自选生成工具，并通过标准 MCP/HTTP 接口修改编排和上传资产。
 
 **只做定义、协作与资产管理，不做模型生成、渲染执行或视频发布。** 不是 ComfyUI，也不是视频剪辑器。
 

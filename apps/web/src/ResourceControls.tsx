@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import type { VideoComposeClient } from "@video-compose/client";
-import type { ProjectRecord } from "@video-compose/domain";
+import type { VFlowClient } from "@vflow/client";
+import type { ProjectRecord } from "@vflow/domain";
 
 function useDialog(close: () => void, busy: boolean) {
   const ref = useRef<HTMLElement>(null);
@@ -55,7 +55,7 @@ export function DeleteDialog({
   onCancel,
   onComplete,
 }: {
-  client: VideoComposeClient;
+  client: VFlowClient;
   target: DeleteTarget;
   onCancel: () => void;
   onComplete: () => void;
@@ -127,7 +127,7 @@ export function SharingDialog({
   onClose,
   onChanged,
 }: {
-  client: VideoComposeClient;
+  client: VFlowClient;
   project: ProjectRecord;
   onClose: () => void;
   onChanged: () => void;

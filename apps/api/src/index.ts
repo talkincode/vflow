@@ -4,8 +4,8 @@ import {
   D1TransactionalStore,
   InMemoryObjectBucket,
   R2ObjectBucketAdapter,
-  VideoComposeDomainService,
-} from "@video-compose/domain";
+  VFlowDomainService,
+} from "@vflow/domain";
 import { createApiApp } from "./app.ts";
 import type { AccessAuthConfig } from "./auth.ts";
 import { D1OAuthStore, InMemoryOAuthStore, type OAuthStore } from "./oauth.ts";
@@ -27,10 +27,10 @@ export interface WorkerEnv {
   ACCESS_JWKS_JSON?: string;
 }
 
-const fallbackMemoryService = new VideoComposeDomainService();
+const fallbackMemoryService = new VFlowDomainService();
 
 export function createWorkerHandler(
-  defaultService: VideoComposeDomainService = fallbackMemoryService,
+  defaultService: VFlowDomainService = fallbackMemoryService,
 ) {
   return {
     async fetch(request: Request, env?: WorkerEnv): Promise<Response> {
@@ -55,7 +55,7 @@ export function createWorkerHandler(
           ? new R2ObjectBucketAdapter(env.MEDIA_BUCKET)
           : new InMemoryObjectBucket();
         const store = new D1TransactionalStore(env.DB, bucket);
-        domain = new VideoComposeDomainService(store);
+        domain = new VFlowDomainService(store);
         oauthStore = new D1OAuthStore(env.DB);
       }
 

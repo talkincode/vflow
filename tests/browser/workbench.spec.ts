@@ -21,6 +21,28 @@ test.beforeEach(async ({ request }) => {
   await request.post("/__test/reset");
 });
 
+test("studio navigation identifies each workspace and keeps editing state visible", async ({ page }) => {
+  await page.goto(demoUrl);
+  const tabs = page.getByRole("tablist", { name: "工作内容" });
+  await expect(tabs.locator(".workspace-icon")).toHaveCount(6);
+  await expect(page.getByTestId("workspace-context")).toContainText("安排镜头");
+  const prompt = page.getByLabel("画面提示词", { exact: true });
+  await prompt.fill("明确当前镜头的编辑重点");
+  await expect(page.locator(".sidebar-footer")).toContainText("未保存草稿");
+  await expect(page.getByTestId("inspector-save-btn")).toBeEnabled();
+  await page.getByRole("tab", { name: "素材", exact: true }).click();
+  await expect(page.getByTestId("workspace-context")).toContainText("图片、视频与音频");
+  await page.getByRole("tab", { name: "分镜", exact: true }).click();
+  await expect(prompt).toHaveValue("明确当前镜头的编辑重点");
+  await page.getByTestId("inspector-save-btn").click();
+  await expect(page.locator(".sidebar-footer")).toContainText("所有镜头已保存");
+  await page.screenshot({ path: "test-results/studio-workbench.png", fullPage: true });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "你的创作项目" })).toBeVisible();
+  await expect(page.getByLabel("项目工作方式")).toContainText("保持角色一致");
+  await page.screenshot({ path: "test-results/studio-projects.png", fullPage: true });
+});
+
 test("100-shot workspace: genuine previews, roomy prompts, draft retention, atomic failure/retry, explicit selection, and batch operations", async ({
   page,
   request,

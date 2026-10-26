@@ -1,4 +1,4 @@
--- Cloudflare D1 schema for MCP OAuth 2.1 in Video Compose
+-- Cloudflare D1 schema for MCP OAuth 2.1 in vflow
 CREATE TABLE IF NOT EXISTS mcp_clients (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

@@ -1,5 +1,9 @@
 {
-  // Cloudflare Worker configuration for Video Compose (canonical hostname: vflow.talkincode.net; legacy alias retained)
+  // Cloudflare Worker configuration for vflow.
+  // Canonical hostname: vflow.talkincode.net; legacy hostname retained as an alias.
+  // The deployed Worker, D1 database and R2 bucket keep their pre-rename names:
+  // renaming them is a coordinated infrastructure migration, not a config edit.
+  // See docs/deployment.md ("Naming: vflow and retained identifiers").
   "name": "video-compose",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",

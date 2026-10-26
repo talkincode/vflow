@@ -1,5 +1,5 @@
 import { CompositionAuthoringSchema, MaterialRevisionSchema } from "./authoring.ts";
-import { REFERENCE_PROTOCOL_VERSION } from "./types.ts";
+import { normalizeProtocolVersion, REFERENCE_PROTOCOL_VERSION } from "./types.ts";
 import {
   type AssetReference,
   type AudioTrackDefinition,
@@ -279,7 +279,7 @@ export function validateSubjectManifest(
   }
 
   const errors: ProtocolValidationError[] = [];
-  if (input.apiVersion !== PROTOCOL_VERSION) {
+  if (normalizeProtocolVersion(input.apiVersion) !== PROTOCOL_VERSION) {
     errors.push({
       code: "UNSUPPORTED_API_VERSION",
       path: "$.apiVersion",
@@ -369,15 +369,16 @@ export function validateCompositionDocument(
   }
 
   const errors: ProtocolValidationError[] = [];
+  const apiVersion = normalizeProtocolVersion(input.apiVersion);
   const authoring = input.authoring === undefined ? undefined : CompositionAuthoringSchema.safeParse(input.authoring);
-  if (authoring && (!authoring.success || input.apiVersion !== REFERENCE_PROTOCOL_VERSION)) errors.push({ code: "INVALID_FORMAT", path: "$.authoring", message: "Typed reference authoring requires video-compose/v2 and a valid manifest." });
+  if (authoring && (!authoring.success || apiVersion !== REFERENCE_PROTOCOL_VERSION)) errors.push({ code: "INVALID_FORMAT", path: "$.authoring", message: `Typed reference authoring requires ${REFERENCE_PROTOCOL_VERSION} and a valid manifest.` });
   if (authoring?.success && context?.availableMaterials) for (const pin of authoring.data.materials) if (!context.availableMaterials.has(`${pin.id}@${pin.revision}`)) errors.push({ code: "MISSING_ASSET_REFERENCE", path: "$.authoring.materials", message: `Missing material ${pin.id}@${pin.revision}` });
 
-  if (input.apiVersion !== PROTOCOL_VERSION && input.apiVersion !== REFERENCE_PROTOCOL_VERSION) {
+  if (!apiVersion) {
     errors.push({
       code: "UNSUPPORTED_API_VERSION",
       path: "$.apiVersion",
-      message: `Unsupported apiVersion '${String(input.apiVersion)}'. Expected '${PROTOCOL_VERSION}'.`,
+      message: `Unsupported apiVersion '${String(input.apiVersion)}'. Expected '${PROTOCOL_VERSION}' or '${REFERENCE_PROTOCOL_VERSION}'.`,
     });
   }
 
@@ -891,7 +892,7 @@ export function validateCompositionDocument(
 
   const formatRecord = input.format as Record<string, number>;
   const doc: CompositionDocument = {
-    apiVersion: input.apiVersion as CompositionDocument["apiVersion"],
+    apiVersion: apiVersion ?? PROTOCOL_VERSION,
     ...(authoring?.success ? { authoring: authoring.data } : {}),
     id: input.id as string,
     project: input.project as string,
@@ -928,7 +929,8 @@ export function validatePortableBundle(
   }
 
   const errors: ProtocolValidationError[] = [];
-  if (input.apiVersion !== PROTOCOL_VERSION && input.apiVersion !== REFERENCE_PROTOCOL_VERSION) {
+  const bundleVersion = normalizeProtocolVersion(input.apiVersion);
+  if (!bundleVersion) {
     errors.push({
       code: "UNSUPPORTED_API_VERSION",
       path: "$.apiVersion",
@@ -997,7 +999,7 @@ export function validatePortableBundle(
   const materials: import("./authoring.ts").MaterialRevision[] = [];
   const availableMaterials = new Map(context?.availableMaterials ?? []);
   if (depsRaw?.materials !== undefined) {
-    if (input.apiVersion !== REFERENCE_PROTOCOL_VERSION || !Array.isArray(depsRaw.materials)) errors.push({ code: "INVALID_FORMAT", path: "$.dependencies.materials", message: "Material dependencies require a v2 bundle and an array." });
+    if (bundleVersion !== REFERENCE_PROTOCOL_VERSION || !Array.isArray(depsRaw.materials)) errors.push({ code: "INVALID_FORMAT", path: "$.dependencies.materials", message: "Material dependencies require a v2 bundle and an array." });
     else for (const [i, raw] of depsRaw.materials.entries()) {
       const parsed = MaterialRevisionSchema.safeParse(raw);
       if (!parsed.success) errors.push({ code: "INVALID_FORMAT", path: `$.dependencies.materials[${i}]`, message: "Invalid material revision." });
@@ -1006,14 +1008,17 @@ export function validatePortableBundle(
   }
   const compositionBaselines: NonNullable<PortableCompositionBundle["dependencies"]["compositionBaselines"]> = [];
   if (depsRaw.compositionBaselines !== undefined) {
-    if (input.apiVersion !== REFERENCE_PROTOCOL_VERSION || !Array.isArray(depsRaw.compositionBaselines)) errors.push({ code: "INVALID_FORMAT", path: "$.dependencies.compositionBaselines", message: "Composition baselines require a v2 array." });
+    if (bundleVersion !== REFERENCE_PROTOCOL_VERSION || !Array.isArray(depsRaw.compositionBaselines)) errors.push({ code: "INVALID_FORMAT", path: "$.dependencies.compositionBaselines", message: "Composition baselines require a v2 array." });
     else for (const [i, raw] of depsRaw.compositionBaselines.entries()) {
       const baseline = isRecord(raw) ? validateCompositionDocument(raw.document, { availableAssets: bundleAssets, availableSubjects: bundleSubjects, availableMaterials }) : undefined;
       if (!isRecord(raw) || !isNonEmptyString(raw.id) || !isPositiveInteger(raw.revision) || !baseline?.ok || baseline.value.id !== raw.id) errors.push({ code: "INVALID_FORMAT", path: `$.dependencies.compositionBaselines[${i}]`, message: "Invalid fixed storyboard composition baseline." });
       else compositionBaselines.push({ id: raw.id, revision: raw.revision, document: baseline.value });
     }
   }
-  if (input.apiVersion !== (input.composition as Record<string, unknown>)?.apiVersion) errors.push({ code: "UNSUPPORTED_API_VERSION", path: "$.apiVersion", message: "Bundle and composition versions must match." });
+  if (
+    bundleVersion !==
+    normalizeProtocolVersion((input.composition as Record<string, unknown>)?.apiVersion)
+  ) errors.push({ code: "UNSUPPORTED_API_VERSION", path: "$.apiVersion", message: "Bundle and composition versions must match." });
   const compResult = validateCompositionDocument(input.composition, {
     availableAssets: bundleAssets,
     availableSubjects: bundleSubjects,
@@ -1041,7 +1046,7 @@ export function validatePortableBundle(
       dependencies: {
         subjects: subjectsList,
         assets: assetsList,
-        ...(input.apiVersion === REFERENCE_PROTOCOL_VERSION ? { materials, compositionBaselines } : {}),
+        ...(bundleVersion === REFERENCE_PROTOCOL_VERSION ? { materials, compositionBaselines } : {}),
       },
     },
     errors: [],

@@ -1,6 +1,12 @@
-# Video Compose Protocol v1 — design draft
+# vflow Protocol v1 — design draft
 
 **Status: draft, not implemented or ratified.** The specification must remain vendor-neutral and testable independently of Cloudflare.
+
+## Wire identifiers and rename compatibility
+- Canonical identifiers are `vflow/v1`, `vflow/v2` and `vflow/reference-workflow/v1`; MCP resource URIs use the `vflow://` scheme.
+- The project was previously named Video Compose. Stored documents and exported bundles written before the rename carry `video-compose/v1`, `video-compose/v2` or `video-compose/reference-workflow/v1`, and existing MCP clients may still request `video-compose://` URIs. Read paths accept those legacy values and normalize them to the canonical identifiers; new writes never emit them.
+- This is a compatibility window, not a second dialect: field semantics, validation and error codes are identical. Existing revisions are not rewritten in place, so legacy identifiers can remain visible in historical revisions and exports.
+- Removing the acceptance is a breaking change and requires a D1 export/rewrite plus a documented migration.
 
 ## Canonical entities
 - Project: tenant ownership, simple member role (`reader` | `writer`), and a namespace for compositions, subjects and assets.
@@ -28,7 +34,7 @@
 
 ## Example (illustrative)
 ```yaml
-apiVersion: video-compose/v1
+apiVersion: vflow/v1
 id: episode-001
 project: demo
 format: { width: 1920, height: 1080, fps: 30 }
@@ -90,8 +96,8 @@ No silent reinterpretation of existing fields. Additive optional fields under v1
 
 ## v2 reference dependency contract
 
-`COMPOSITION_JSON_SCHEMA` remains v1. `COMPOSITION_V2_JSON_SCHEMA` declares `video-compose/v2` and optional `authoring: {policyVersion, materials: [{id, revision}]}`. `set_authoring` upgrades explicitly, preserving sequence, shot definitions, durations, Subject bindings and selected outputs.
+`COMPOSITION_JSON_SCHEMA` remains v1. `COMPOSITION_V2_JSON_SCHEMA` declares `vflow/v2` and optional `authoring: {policyVersion, materials: [{id, revision}]}`. `set_authoring` upgrades explicitly, preserving sequence, shot definitions, durations, Subject bindings and selected outputs.
 
-Reference documents use `video-compose/reference-workflow/v1`: discriminated policy, scene, reference_pack and storyboard_sequence schemas exported from `authoring.ts`. Scene identity, environment variant, per-view owner/purpose, crop provenance, text policy and visual review are typed fields, not provider metadata or asset tags. Prompts remain separate from clean image pixels.
+Reference documents use `vflow/reference-workflow/v1`: discriminated policy, scene, reference_pack and storyboard_sequence schemas exported from `authoring.ts`. Scene identity, environment variant, per-view owner/purpose, crop provenance, text policy and visual review are typed fields, not provider metadata or asset tags. Prompts remain separate from clean image pixels.
 
 V2 bundle dependencies include exact material revisions and compositionBaselines required by sequences, alongside subjects and assets. V1 readers reject v2; lossy conversion is refused with UNREPRESENTABLE_IN_V1. All necessary assets must already exist with matching hashes on import; missing/cyclic/conflicting dependencies fail atomically. Rules, complete workflow, schema resources, input/evidence contracts and rollback are specified in [reference-authoring.md](reference-authoring.md).

@@ -1,7 +1,7 @@
-import { canonicalizeJson, PROTOCOL_VERSION } from "@video-compose/protocol";
+import { canonicalizeJson, PROTOCOL_VERSION } from "@vflow/protocol";
 import { describe, expect, it } from "vitest";
 import { createTestHarness } from "./helpers.ts";
-import { handleMcpJsonRpc } from "@video-compose/api";
+import { handleMcpJsonRpc } from "@vflow/api";
 
 describe("E2E 06 — HTTP/MCP 接入 (HTTP REST & Remote MCP Parity)", () => {
   it("Happy Path: REST and MCP tools produce identical canonical results and support idempotent retries", async () => {

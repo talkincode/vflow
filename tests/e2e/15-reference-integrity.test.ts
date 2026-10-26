@@ -7,7 +7,7 @@ import {
   REQUIRED_REVIEW_CHECKS,
   type ReferencePack,
   type MaterialRevision,
-} from "@video-compose/protocol";
+} from "@vflow/protocol";
 import { createTestHarness } from "./helpers.ts";
 import {
   approveMaterial,
@@ -406,7 +406,7 @@ describe("E2E 15 — grids, lineage, rollback and legacy migration", () => {
       const sequence = Array.from({ length: count }, (_, i) => `shot-${i + 1}`);
       const document = {
         ...structuredClone(f.document),
-        apiVersion: "video-compose/v1" as const,
+        apiVersion: "vflow/v1" as const,
         id,
         sequence,
         shots: Object.fromEntries(
@@ -481,7 +481,7 @@ describe("E2E 15 — grids, lineage, rollback and legacy migration", () => {
           projectId,
           targetCompositionId: id,
           payload: JSON.stringify({
-            apiVersion: "video-compose/v1",
+            apiVersion: "vflow/v1",
             composition: document,
             dependencies: {
               subjects: bundle.bundle.dependencies.subjects,

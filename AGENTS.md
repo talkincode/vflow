@@ -1,4 +1,4 @@
-# AGENTS.md — Video Compose
+# AGENTS.md — vflow
 
 ## Mission
 Build a portable, versioned declarative video composition protocol and a lightweight human/multi-Agent collaboration workspace. TypeScript is the primary language.
@@ -8,6 +8,7 @@ Build a portable, versioned declarative video composition protocol and a lightwe
 - No image/video generation runtime, no ComfyUI-like execution graph, no built-in media rendering, no publishing integrations.
 - Deployment MUST target Cloudflare Workers; do not introduce PM2/systemd/VPS runtime, fabricated hostnames, example.com domains or hardcoded ports as deployed facts.
 - Production hostname MUST be a `talkincode.net` subdomain managed by Cloudflare; canonical target `vflow.talkincode.net`; retain `video-compose.talkincode.net` as a compatibility alias. Verify actual DNS/Worker routing before claiming it is live.
+- Naming is canonical: project `vflow`, package scope `@vflow/*`, protocol identifiers `vflow/v1` / `vflow/v2` / `vflow/reference-workflow/v1`, MCP resource scheme `vflow://`. Pre-rename `video-compose/*` identifiers are accepted on read only; never emit new ones. Deployed Cloudflare resource names (`video-compose`, `video-compose-db`, `video-compose-media`) and the legacy hostname stay as recorded facts until an explicit, verified migration (see [deployment](docs/deployment.md#naming-vflow-and-retained-identifiers)).
 - Browser UI, REST API and MCP MUST be protected with Cloudflare Access (Zero Trust SSO / service authentication as appropriate); Worker MUST still enforce per-project authorization.
 - GitHub-to-Workers deployment MUST be supported, preferring native Workers Builds GitHub integration; GitHub Actions + Wrangler is an alternative, never a simultaneous competing production deployer.
 - Distinguish design decisions from verified live infrastructure. Do not report CI, DNS, Access, R2 or D1 as configured without inspecting actual resources.
