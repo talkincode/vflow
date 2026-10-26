@@ -108,6 +108,101 @@ Web 客户端只在显式 `getAuthoringWorkflow` 成功后缓存 context，随�
 
 较新修订否决某张历史图片时，默认生产准备会拒绝该图片及其依赖链；旧批准修订仍可读取，不自动改写时间线。未审阅的失败输出必须重新建立候选和逐项审阅，不能上传后自动成为下一轮权威来源。
 
+## 动态白模参考（`motion_reference`，L0）
+
+L0 边界：白模由**外部** Blender、Three.js 或任何其他工具生成并上传；vflow 不渲染、不打开、不解析归档工程，也不提供 3D 编辑器。平台只登记、审阅、固定、交付（输入包）并核对实际使用。核心 Schema 没有任何引擎或供应商字段，工具名称、版本和导出方式只能写进自由文本 `provenance`，平台不解释它。
+
+它是 `vflow/reference-workflow/v1` 资料联合体的新 `kind`，因此复用同一套修订历史、逐项审阅、批准冻结、CAS/幂等、ACL、`workflowContext`、输入准备、证据、导入导出与资产保留机制，不新增 REST/MCP 入口。它只携带**机位运动、走位、动作时序、构图**证据，绝不是身份/服装/环境参考，也不会自动成为首帧或尾帧。
+
+### 文档字段（`.strict()`，未知字段被拒绝）
+
+| 字段 | 含义与校验 |
+| --- | --- |
+| `kind: "motion_reference"`、`id`、`title`、`schemaVersion` | 与其他资料相同；`review` 只能由 `authoring_document_review` 写入（CRUD 写入会被清除）。 |
+| `compositionId`、`compositionRevision`、`shotId` | 固定编排基准；该修订和镜头必须存在。 |
+| `scene: {id, revision}`、`environmentVariant` | 精确场景修订与环境变体；变体必须存在，批准时场景须已批准。 |
+| `subjects: [{kind, id, revision, variant}]` | `character`/`prop` 修订与**解析后**的变体；必须与基准镜头的 Subject 绑定逐一对应（缺一、多一、变体不符、种类不符均拒绝）。 |
+| `fps`、`durationFrames` | 白模视频**自身**帧域的整数帧率（1–240）和总帧数。L0 只支持**完整镜头**参考：文档没有偏移或覆盖区间字段，所以 `durationFrames/fps` 必须与镜头 `durationFrames/编排 fps` 是**同样的秒数**（96f@24 对 120f@30 合法，更短、更长或镜头未声明时长都拒绝，`MOTION_TIMING_INVALID`）；第 0 帧对齐镜头起点。部分片段需要明确范围字段，未来以 additive 字段引入。 |
+| `video.asset` | `video/*` 白模视频；若上传时登记了 `durationFrames`，必须与本文档一致。 |
+| `overview.asset` | 总览静帧，PNG/JPEG 且头部尺寸已解析；供人审阅，不属于任何输入包。 |
+| `keyframes: [{id, asset, momentFrame, purpose, note?}]` | 至少 1 个。`momentFrame` 为白模视频自身帧域的 0 起始帧位（`< durationFrames`）；`purpose` 属 `usage`；同一帧位+用途不重复；图片同样需解析头部尺寸。 |
+| `source.asset` | 归档的外部工程（任意 MIME）。只存档、可导出，永远不进入输入包。 |
+| `usage` | 声明用途，非空且不重复：`camera_motion`、`blocking`、`action_timing`、`framing`。 |
+| `provenance` | 自由文本制作说明。 |
+
+视频、总览、归档与每个关键帧必须是互不相同的资产（一个资产只承担一个运动角色）。任一内容修改都会追加一个无审阅的候选修订，必须重新审阅；已批准修订保持字节不变，编排仍固定它。
+
+### 生命周期
+
+1. 外部工具产出视频、总览静帧、关键帧和归档，全部作为新的不可变资产上传。
+2. `authoring_document_put` 创建候选（上述结构与项目校验全部在此执行，失败不留记录）。
+3. `authoring_document_review`，`targets: ["$document"]`，整体审阅，**须完整播放视频**。必检项：`whitebox_only`（无贴图/身份渲染）、`scene_geometry_match`、`subject_blocking_match`、`timing_verified`、`keyframes_match_video`、`text_policy`（画面无烧录文字）。接受须全部 `pass`；`unknown`/缺失/`fail` 不能批准。Agent 须使用 `method: external`。
+4. `authoring_document_approve` 追加已批准修订。之后的驳回审阅会撤销生产资格，待审编辑不能恢复它，只有新的批准审阅才能恢复。
+5. 用 `set_authoring` 把已批准修订固定到编排；任何写入口（patch、提案、创建、导入、恢复）都经同一校验，候选或无效修订被拒绝。
+6. `generation_inputs_prepare` 带 `motion` 准备输入包；外部执行后 `generation_evidence_record` 回报 `actualMotion`。
+
+资产纯度：已批准的身份/环境/分镜图以及任何 Subject 参考图，与已批准的白模媒体互斥；任一方向复用同一资产都被拒绝（`REFERENCE_SCOPE_MISMATCH`）——参考包/序列批准、Subject 的创建/修订/附加参考/批准/导入、白模批准都校验，严格与旧项目一致。严格项目的镜头直接参考也不接受白模图，因为它们不属于已批准参考包或面板。
+
+### 输入包与降级
+
+请求新增可选 `motion`，能力新增可选 `capabilities.motion`：
+
+```json
+{
+  "capabilities": {
+    "motion": {
+      "video": { "maxVideos": 1, "maxDurationMs": 10000, "usages": ["camera_motion", "blocking", "action_timing"] },
+      "keyframes": { "usages": ["camera_motion", "blocking", "action_timing"] }
+    }
+  },
+  "motion": {
+    "reference": { "id": "spell-motion", "revision": 3 },
+    "usage": ["camera_motion", "blocking", "action_timing"],
+    "delivery": "video",
+    "keyframeIds": ["kf-start"]
+  }
+}
+```
+
+- `delivery: "video"`：整段视频。`capabilities.motion.video` 必须已明示并覆盖请求用途与时长，否则 `MOTION_VIDEO_CAPABILITY_REQUIRED` / `MOTION_USAGE_UNSUPPORTED` / `MOTION_VIDEO_LIMIT_EXCEEDED`，**不会自动降级**；此时不得带 `keyframeIds`（`MOTION_DELIVERY_AMBIGUOUS`）。`maxVideos` 目前只用于明示至少支持一个视频，一次只交付一个白模视频。
+- `delivery: "keyframes"`：显式降级，必须列出确切的 `keyframeIds`（非空、唯一、存在）。每个请求的用途至少要有一个所选关键帧，所选关键帧的用途不得超出请求（`MOTION_KEYFRAMES_REQUIRED` / `MOTION_USAGE_UNSUPPORTED`），且需已明示 `capabilities.motion.keyframes`（`MOTION_KEYFRAME_CAPABILITY_REQUIRED`）。关键帧是图片，**计入** `maxImages`，超出返回 `REFERENCE_BUDGET_EXCEEDED`；绝不静默丢弃、替换或截断。
+- `motion` 以外的任何入口都不能提供白模：把它当 `source`/`sequence` 输入（含 `first_frame`/`last_frame`）返回 `REFERENCE_USAGE_AMBIGUOUS`。
+
+固定条件：被固定且已批准、未被驳回；有效的 `validateMaterial` 全部通过。**漂移**（`MOTION_BASELINE_DRIFT`）区分设计意图与生产结果：意图是基准的一部分，结果不是。漂移 = 请求的编排/镜头不是文档的；镜头 `durationFrames`、`description`、`prompts`、`dependsOn`（边集合，与顺序无关）、解析后的主体/变体、编排 `format`（尺寸/fps）、同一场景的直接固定修订，任一与基准编排修订不同。镜头上的 `candidates`/`selected`（结果）以及 `references`/`extensions` **不算**漂移，否则首个候选一登记就无法重新生成；动作文字（`description`/`prompts`）改了，旧白模可能已不描述这个镜头，因此要求重新制作并批准新的白模。基准是文档固定的 `compositionRevision`，消费端可凭导出的 `compositionBaselines` 自行判定。更早的编排修订仍可准备，历史不被改写。
+
+输入包新增可选 `motion`（无 `motion` 请求时与旧版逐字相同，hash 不变）：
+
+```json
+{
+  "reference": { "id": "spell-motion", "revision": 3 },
+  "contentHash": "<sha256(canonical JSON of the pinned document)>",
+  "delivery": "video",
+  "usage": ["camera_motion", "blocking", "action_timing"],
+  "scene": { "id": "bridge", "revision": 3 },
+  "environmentVariant": "night",
+  "fps": 24,
+  "durationFrames": 96,
+  "video": { "asset": "mo-video", "sha256": "…" },
+  "keyframes": [{ "id": "kf-start", "asset": "…", "sha256": "…", "momentFrame": 0, "purpose": "blocking" }]
+}
+```
+
+`video` 与 `keyframes` 恰有一个（由 `delivery` 决定），关键帧按 `momentFrame`、`id` 排序，因此请求里的列出顺序不影响结果。总览静帧与归档不出现在输入包。`contentHash` 让消费方核对自己持有的导出文档与输入包用的修订一致。
+
+### 实际使用证据
+
+`generation_evidence_record` 新增可选 `actualMotion`：`{delivery, video?}` 或 `{delivery, keyframes?: [{asset, sha256}]}`，资产必须存在且 hash 与登记一致。`matchesPlan` 同时比较图片输入与白模：计划用视频却未回报、改用关键帧、数量/顺序不同、对没有 motion 的计划回报了白模，都是不匹配；`manual_unknown` 永不匹配。仍重新核实输入包，伪造或已不再就绪的包被拒绝。证据不可变，写入故障不留半条记录。
+
+### 导出、导入、保留
+
+编排被固定后，导出包的 `dependencies` 完整携带：`materials`（含 `motion_reference` 修订与其场景）、`assets`（视频/总览/关键帧/归档的 `id/sha256/mimeType/sizeBytes/durationFrames`）、`compositionBaselines`（该白模固定的基准编排修订）和 `subjects`（所列主体修订）。二进制仍通过资产内容路由受权拉取，不打包。导入要求目标项目已有相同 ID/hash 的全部资产，且已批准的白模文档重新校验通过；缺媒体/物料/基准、hash 不符、未审阅而声称已批准、存储故障均原子回滚。v1 导出返回 `UNREPRESENTABLE_IN_V1`。被物料或证据引用的资产不能删除。
+
+### 限制与人工点
+
+- 平台不解码视频，也不会验证视频真实 fps/时长/画面内容；`fps`/`durationFrames` 是声明值，`timing_verified`/`keyframes_match_video` 只记录审阅者的结论。只有上传时登记的 `durationFrames` 与文档一致这一项被机械核对。
+- 视觉语义（白模与场景几何、走位是否对应、无烧录文字）仍需人完整播放确认；真实 Chromium 的验收只证明视频能解码、播放、拖动。
+- 整段视频能否被目标工具作为参考，取决于调用方明示的能力；平台不探测目标工具。
+
 ## v1/v2、D1 迁移与回滚
 
 - `vflow/v1` 继续读写历史结构。其 JSON Schema 保持 v1 常量且不接收 authoring。v2 有独立 `COMPOSITION_V2_JSON_SCHEMA`；`set_authoring` 是明确协议升级，不伪装成 v1 扩展字段。
@@ -120,6 +215,7 @@ Web 客户端只在显式 `getAuthoringWorkflow` 成功后缓存 context，随�
 - 导出当前包含原板的受权资产元数据与 hash，不打包二进制，不生成共享链接。独立媒体分发由维护者明确选择，不能把导出 JSON 当成已公开图片。
 - v1 导出只允许无损内容；存在 authoring 返回 `UNREPRESENTABLE_IN_V1` 和不可表示路径。往现有 v2 编排导入 v1 同样拒绝。不能通过旧接口静默删字段。
 - 导入支持 operationId 重放；对现有 strict 目标还需当前 baseRevision，防止并发覆盖。
+- 动态白模参考不新增表、列或迁移：`motion_reference` 修订与 `actualMotion` 证据以整条记录 JSON 存入既有 `reference_documents`/`reference_evidence`。回滚到不含它的 Worker 前须知：旧 Worker 无法识别该 kind，也就不会再保护白模资产免于删除；回滚期间关闭资产删除，并在恢复新版本前不要删除任何 `video/*` 或归档资产。回退是部署新的修复版，不是删除记录。
 - 回滚 Worker 时保留新表和新记录；旧只读者仍可读 v1 历史，v2 应用具备相应验证能力的版本处理。不要用旧写服务覆盖 v2；先关闭旧写入口，部署修复版。回退到旧资料通过明确新绑定/恢复修订完成，历史不删除。
 
 PNG/JPEG 的尺寸来自上传字节头解析，不能由客户端自报尺寸伪装为已核实。这里只核实头部尺寸，不宣称完整图片解码或视觉有效；其他格式可归档，待外部转换为独立 PNG/JPEG 后再进入严格参考。真实浏览器解码是另外的验收证据。
@@ -138,5 +234,17 @@ PNG/JPEG 的尺寸来自上传字节头解析，不能由客户端自报尺寸�
 | A14/A15 权限、stale context、冲突、幂等与故障恢复 | `14/15`，真实浏览器 `reference-authoring.spec.ts` |
 | A16 v2 交换与 31+32 镜头/5316+4800 帧保留 | `14/15` |
 | A17 原图/输入包实际解码与失败表单恢复 | `tests/browser/reference-authoring.spec.ts` |
+
+动态白模参考验收：
+
+| 验收 | 证据 |
+| --- | --- |
+| M01–M05 提交→整体审阅→批准冻结、重审、角色、写失败恢复、MCP/REST 一致 | `tests/e2e/18-motion-reference-lifecycle.test.ts` |
+| V01–V04 媒体角色/时长/关键帧、严格无厂商字段、场景/主体精确固定、用途隔离 | `tests/e2e/19-motion-reference-validation.test.ts` |
+| P01–P08 视频能力明示、显式关键帧降级与预算、用途、批准/固定/驳回、漂移、权限 | `tests/e2e/20-motion-reference-inputs.test.ts` |
+| E01–E07 实际使用证据、保留、导出/导入完整与回滚、影响查询 | `tests/e2e/21-motion-reference-evidence-and-portability.test.ts`、`09`（D1/R2 跨 isolate） |
+| D01–D02 Schema 可发现（工具/资源/提示）、纯 MCP 全生命周期、两代 MCP | `tests/e2e/22-motion-reference-mcp-discovery.test.ts` |
+| N01–N03 所有写入口同一规则、回收站、旧项目 | `tests/e2e/23-motion-reference-entries.test.ts` |
+| W01–W03、M-UI 播放/审阅/计划/证据展示、只读角色、布局 | `tests/e2e/24-motion-reference-workbench.test.tsx`、`tests/browser/motion-reference.spec.ts` |
 
 这些测试使用合成数据，不连接线上 MV 项目、不消耗模型点数。它们验证平台契约与浏览器行为，不能替代生产中实际图片及完整视频的视觉验收。

@@ -16,6 +16,7 @@ import {
   type MaterialDocument,
   type MaterialRecord,
   type MaterialRevision,
+  type MotionReference,
   type ReferencePack,
   type ReferenceOwner,
   type ReferencePurpose,
@@ -23,6 +24,11 @@ import {
   type GenerationEvidence,
 } from "@vflow/protocol";
 import { MediaPreview } from "./MediaPreview.tsx";
+import {
+  ActualMotionView,
+  MotionPacketView,
+  MotionReferenceView,
+} from "./MotionReferenceView.tsx";
 
 const categories: Record<ReferencePack["category"], string> = {
   moodboard: "原始 / 混合板（仅归档）",
@@ -56,6 +62,32 @@ function template(kind: string, owner?: ReferenceOwner): MaterialDocument {
       environmentVariants: {
         base: { time: "待确认", weather: "待确认", state: "待确认环境状态" },
       },
+    };
+  if (kind === "motion_reference")
+    return {
+      ...common,
+      kind,
+      compositionId: "",
+      compositionRevision: 1,
+      shotId: "",
+      scene: { id: "先创建场景", revision: 1 },
+      environmentVariant: "选择环境变体",
+      subjects: [],
+      fps: 24,
+      durationFrames: 1,
+      video: { asset: "选择白模视频" },
+      overview: { asset: "选择总览静帧" },
+      keyframes: [
+        {
+          id: "keyframe-1",
+          asset: "选择关键帧图片",
+          momentFrame: 0,
+          purpose: "blocking",
+        },
+      ],
+      source: { asset: "选择归档工程" },
+      usage: ["camera_motion", "blocking", "action_timing"],
+      provenance: "填写外部工具、版本和导出方式（自由文本，平台不解析）",
     };
   if (kind === "storyboard_sequence")
     return {
@@ -129,6 +161,12 @@ export function AuthoringPanel({
   const [packet, setPacket] = useState<GenerationInputPacket>();
   const [reports, setReports] = useState<GenerationEvidence[]>([]);
   const [actual, setActual] = useState("[]");
+  const [motionKey, setMotionKey] = useState("");
+  const [motionDelivery, setMotionDelivery] = useState<"video" | "keyframes">(
+    "video",
+  );
+  const [motionKeyframes, setMotionKeyframes] = useState<string[]>([]);
+  const [actualMotion, setActualMotion] = useState("");
   const [outputs, setOutputs] = useState("");
   const [executionNote, setExecutionNote] = useState("");
   const [method, setMethod] =
@@ -212,6 +250,18 @@ export function AuthoringPanel({
         );
     }),
   );
+  const planShot = activeShotId ?? composition.sequence[0];
+  const motionRefs = (composition.authoring?.materials ?? []).flatMap((pin) => {
+    const rev = records.find((r) => r.id === pin.id)?.revisions[pin.revision];
+    return rev?.status === "approved" &&
+      rev.document.kind === "motion_reference" &&
+      rev.document.shotId === planShot
+      ? [{ pin, doc: rev.document as MotionReference }]
+      : [];
+  });
+  const motionChoice = motionRefs.find(
+    (m) => `${m.pin.id}@${m.pin.revision}` === motionKey,
+  );
   const ownerValue = (o: ReferenceOwner) =>
     `${o.kind}:${o.id}@${o.revision}/${o.variant}`;
   const chosenOwner = owners.find((o) => ownerValue(o) === ownerKey);
@@ -257,6 +307,7 @@ export function AuthoringPanel({
       update(next);
     }
   };
+  const wholeDocument = doc?.kind === "scene" || doc?.kind === "motion_reference";
   const saved = current && draft === json(current.document);
   useEffect(() => {
     onDirtyChange?.(
@@ -358,6 +409,7 @@ export function AuthoringPanel({
                 ))}
                 <option value="scene">场景定义与环境状态</option>
                 <option value="storyboard_sequence">无字分镜序列</option>
+                <option value="motion_reference">白模动态参考（外部生成）</option>
               </select>
             </label>
             <label>
@@ -381,6 +433,41 @@ export function AuthoringPanel({
                 if (t.kind === "storyboard_sequence") {
                   t.compositionId = composition.id;
                   t.compositionRevision = compositionRevision;
+                }
+                if (t.kind === "motion_reference") {
+                  const shotId = activeShotId ?? composition.sequence[0];
+                  const shot = composition.shots[shotId];
+                  const first = (prefix: string, fallback: string) =>
+                    assets.find((a) => a.mimeType.startsWith(prefix))?.id ??
+                    fallback;
+                  t.compositionId = composition.id;
+                  t.compositionRevision = compositionRevision;
+                  t.shotId = shotId;
+                  if (chosenOwner?.kind === "scene") {
+                    t.scene = {
+                      id: chosenOwner.id,
+                      revision: chosenOwner.revision,
+                    };
+                    t.environmentVariant = chosenOwner.variant;
+                  }
+                  t.subjects = (shot?.subjects ?? []).map((binding) => {
+                    const subject = subjects.find(
+                      (x) => x.id === binding.subjectId,
+                    )?.revisions[binding.subjectRevision];
+                    return {
+                      kind: subject?.kind ?? "character",
+                      id: binding.subjectId,
+                      revision: binding.subjectRevision,
+                      variant:
+                        binding.variant ?? subject?.defaultVariant ?? "default",
+                    };
+                  });
+                  // Whole-shot coverage: start from the shot's own frame domain; keep seconds equal if fps is changed.
+                  t.fps = composition.format.fps;
+                  if (shot?.durationFrames) t.durationFrames = shot.durationFrames;
+                  t.video.asset = first("video/", t.video.asset);
+                  t.overview.asset = first("image/", t.overview.asset);
+                  t.keyframes[0].asset = first("image/", t.keyframes[0].asset);
                 }
                 setCurrent(undefined);
                 update(t);
@@ -629,6 +716,14 @@ export function AuthoringPanel({
                         添加序列单帧
                       </button>
                     </>
+                  )}
+                  {doc.kind === "motion_reference" && (
+                    <MotionReferenceView
+                      doc={doc}
+                      client={client}
+                      projectId={projectId}
+                      assets={assets}
+                    />
                   )}
                   {doc &&
                     "board" in doc &&
@@ -893,7 +988,9 @@ export function AuthoringPanel({
                     逐项视觉审阅 ·{" "}
                     {doc.kind === "scene"
                       ? "场景定义"
-                      : selected || "先选择一格"}
+                      : doc.kind === "motion_reference"
+                        ? "白模动态参考（整体审阅，须完整播放）"
+                        : selected || "先选择一格"}
                   </legend>
                   {required.map((c) => (
                     <label key={c}>
@@ -937,7 +1034,7 @@ export function AuthoringPanel({
                     />
                   </label>
                   <button
-                    disabled={!current || (doc.kind !== "scene" && !selected)}
+                    disabled={!current || (!wholeDocument && !selected)}
                     onClick={() =>
                       void run(async () => {
                         const result = await client.reviewAuthoringDocument({
@@ -945,9 +1042,7 @@ export function AuthoringPanel({
                           id: current!.document.id,
                           baseRevision: current!.revision,
                           operationId: operation.current,
-                          targets: [
-                            doc.kind === "scene" ? "$document" : selected,
-                          ],
+                          targets: [wholeDocument ? "$document" : selected],
                           review: {
                             decision,
                             method: "human",
@@ -1048,6 +1143,106 @@ export function AuthoringPanel({
         >
           新建输入计划
         </button>
+        <fieldset
+          disabled={disabled || busy || !request}
+          className="motion-plan"
+        >
+          <legend>白模动态参考（可选）</legend>
+          <p className="muted">
+            只使用已批准并已固定到此编排的白模参考。目标工具是否接受参考视频必须在计划的
+            capabilities.motion 中明示；不支持时只能在此显式选择关键帧降级，所选关键帧会计入图片数量。
+          </p>
+          <label>
+            白模参考
+            <select
+              aria-label="白模动态参考"
+              value={motionKey}
+              onChange={(e) => {
+                setMotionKey(e.target.value);
+                setMotionKeyframes([]);
+              }}
+            >
+              <option value="">不使用</option>
+              {motionRefs.map(({ pin, doc: m }) => (
+                <option key={`${pin.id}@${pin.revision}`} value={`${pin.id}@${pin.revision}`}>
+                  {m.title} · {pin.id}@{pin.revision}
+                </option>
+              ))}
+            </select>
+          </label>
+          {motionChoice && (
+            <>
+              <label>
+                交付方式
+                <select
+                  aria-label="白模交付方式"
+                  value={motionDelivery}
+                  onChange={(e) =>
+                    setMotionDelivery(e.target.value as "video" | "keyframes")
+                  }
+                >
+                  <option value="video">
+                    整段白模视频（需目标工具已验证视频参考能力）
+                  </option>
+                  <option value="keyframes">
+                    显式降级：只发送下方勾选的关键帧
+                  </option>
+                </select>
+              </label>
+              {motionDelivery === "keyframes" &&
+                motionChoice.doc.keyframes.map((k) => (
+                  <label key={k.id}>
+                    <span>
+                      <input
+                        type="checkbox"
+                        aria-label={`选择关键帧 ${k.id}`}
+                        checked={motionKeyframes.includes(k.id)}
+                        onChange={(e) =>
+                          setMotionKeyframes(
+                            e.target.checked
+                              ? [...motionKeyframes, k.id]
+                              : motionKeyframes.filter((id) => id !== k.id),
+                          )
+                        }
+                      />{" "}
+                      {k.id} · 第 {k.momentFrame} 帧 · {k.purpose}
+                    </span>
+                  </label>
+                ))}
+            </>
+          )}
+          <button
+            onClick={() => {
+              let plan: Record<string, unknown>;
+              try {
+                plan = JSON.parse(request);
+              } catch {
+                setError("输入计划不是合法 JSON（草稿已保留）");
+                return;
+              }
+              setError("");
+              if (!motionChoice) delete plan.motion;
+              else
+                plan.motion = {
+                  reference: motionChoice.pin,
+                  usage: motionChoice.doc.usage,
+                  delivery: motionDelivery,
+                  ...(motionDelivery === "keyframes" && motionKeyframes.length
+                    ? { keyframeIds: motionKeyframes }
+                    : {}),
+                };
+              setRequest(json(plan));
+              setPacket(undefined);
+              setNotice(
+                motionChoice
+                  ? "已写入白模动态参考；请核实并填写目标工具能力后再准备输入包。"
+                  : "已从输入计划移除白模动态参考。",
+              );
+            }}
+          >
+            写入输入计划
+          </button>
+        </fieldset>
         <label>
           输入计划 JSON
           <textarea
@@ -1075,6 +1270,28 @@ export function AuthoringPanel({
                   : result.diagnostics
                       .map((d) => `${d.code}: ${d.message} ${d.action}`)
                       .join("\n"),
+              );
+              setActualMotion(
+                result.packet?.motion
+                  ? json({
+                      delivery: result.packet.motion.delivery,
+                      ...(result.packet.motion.video
+                        ? {
+                            video: {
+                              asset: result.packet.motion.video.asset,
+                              sha256: result.packet.motion.video.sha256,
+                            },
+                          }
+                        : {}),
+                      ...(result.packet.motion.keyframes
+                        ? {
+                            keyframes: result.packet.motion.keyframes.map(
+                              ({ asset, sha256 }) => ({ asset, sha256 }),
+                            ),
+                          }
+                        : {}),
+                    })
+                  : "",
               );
               if (result.packet)
                 setActual(
@@ -1105,6 +1322,14 @@ export function AuthoringPanel({
                 </article>
               ))}
             </div>
+            {packet.motion && (
+              <MotionPacketView
+                motion={packet.motion}
+                client={client}
+                projectId={projectId}
+                assets={assets}
+              />
+            )}
             <details>
               <summary>输入包完整清单</summary>
               <pre>{json(packet)}</pre>
@@ -1119,6 +1344,16 @@ export function AuthoringPanel({
                   onChange={(e) => setActual(e.target.value)}
                 />
               </label>
+              {packet.motion && (
+                <label>
+                  实际白模输入（留空表示未使用）
+                  <textarea
+                    aria-label="实际白模输入记录"
+                    value={actualMotion}
+                    onChange={(e) => setActualMotion(e.target.value)}
+                  />
+                </label>
+              )}
               <label>
                 输出素材 ID（逗号分隔）
                 <input
@@ -1153,6 +1388,9 @@ export function AuthoringPanel({
                       operationId: operation.current,
                       packet,
                       actualInputs: JSON.parse(actual),
+                      ...(actualMotion.trim()
+                        ? { actualMotion: JSON.parse(actualMotion) }
+                        : {}),
                       outputs: outputs
                         .split(",")
                         .map((s) => s.trim())
@@ -1191,6 +1429,9 @@ export function AuthoringPanel({
                 </article>
               ))}
             </div>
+            {(r.packet.motion || r.actualMotion) && (
+              <ActualMotionView actual={r.actualMotion} report={r} />
+            )}
             <pre>
               {json({
                 planned: r.packet.inputs.map(({ asset, role }) => ({
@@ -1198,6 +1439,20 @@ export function AuthoringPanel({
                   role,
                 })),
                 actual: r.actualInputs,
+                ...(r.packet.motion || r.actualMotion
+                  ? {
+                      plannedMotion: r.packet.motion
+                        ? {
+                            delivery: r.packet.motion.delivery,
+                            video: r.packet.motion.video?.asset,
+                            keyframes: r.packet.motion.keyframes?.map(
+                              (k) => k.asset,
+                            ),
+                          }
+                        : null,
+                      actualMotion: r.actualMotion ?? null,
+                    }
+                  : {}),
                 outputs: r.outputs,
               })}
             </pre>

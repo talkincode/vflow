@@ -14,7 +14,7 @@ vflow 面向人与多个 Agent 共创视频作品。项目原名 Video Compose�
 - 首页提供项目列表、搜索与新建；项目页显示编排及共享资源概览，可创建编排并选择画面规格/帧率。工作台支持返回项目、切换编排和独立直达地址。
 - **角色/道具设定库**：项目级主体（Subject）有独立定义、稳定 ID、带状态（`status: candidate | approved`）的修订版本、外观/状态变体（含 `defaultVariant`）和多视角参考图集；`candidate` 状态便于修改迭代，批准为 `approved` 后冻结；分镜绑定确定版本，禁止参考设定悄然漂移。详见 [主体与参考图规范草案](docs/subjects.md)。
 - v1/v2 JSON/YAML 声明式编排协议和独立可机读 Schema；v2 固定参考资料来源并拒绝有损 v1 导出。
-- **参考制作工作流**：单角色面部/身体分包、道具逐格归属、独立场景与环境变体、无字序列、逐图审阅、准确的生成输入包和外部实际输入证据。MCP 提供 instructions、prompts、resources 与纯工具兜底，领域层防止旧写入口绕过。[制作规范与迁移指南](docs/reference-authoring.md)。
+- **参考制作工作流**：单角色面部/身体分包、道具逐格归属、独立场景与环境变体、无字序列、外部生成的动态白模参考（机位/走位/动作时序证据，整体审阅后固定，目标工具视频能力须明示，关键帧降级须显式）、逐图审阅、准确的生成输入包和外部实际输入证据。MCP 提供 instructions、prompts、resources 与纯工具兜底，领域层防止旧写入口绕过。[制作规范与迁移指南](docs/reference-authoring.md)。
 - 稳定 Shot ID、播放序列与分镜依赖拓扑（`dependsOn` DAG）、全局音轨（`audioTracks` 如全局 BGM/旁白）、分镜多参考图、可选参考视频、Prompt、音视频候选集（`candidates`）与选定输出（`selected`）、整数帧时长与扩展元数据。
 - 不可变 R2 媒体（两阶段上传与 SHA-256 校验）与 D1 资产索引、修订历史、基于稳定 ID 的结构化 Patch、冲突检测和审阅提案（Proposal）。
 - 统一 REST/MCP 接口；React 工作台提供分镜、素材、角色与道具、参考制作、协作与历史、协议标签页，保留网格、清单和依赖视图。

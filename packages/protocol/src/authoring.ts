@@ -229,11 +229,63 @@ export const StoryboardSequenceSchema = z
   })
   .strict();
 export type StoryboardSequence = z.infer<typeof StoryboardSequenceSchema>;
+/**
+ * Engine-agnostic dynamic white-model ("blockout") reference. The video, overview
+ * still, keyframes and source archive are produced and uploaded externally; vflow
+ * never renders, opens or interprets them. A motion reference carries motion
+ * evidence only (camera path, blocking, action timing, framing). It is never an
+ * identity, wardrobe, environment, first-frame or last-frame source.
+ */
+export const MOTION_USAGES = [
+  "camera_motion",
+  "blocking",
+  "action_timing",
+  "framing",
+] as const;
+export const MotionUsageSchema = z.enum(MOTION_USAGES);
+export type MotionUsage = z.infer<typeof MotionUsageSchema>;
+const MotionAssetSchema = z.object({ asset: id }).strict();
+export const MotionSubjectSchema = z
+  .object({ kind: z.enum(["character", "prop"]), id, revision, variant: id })
+  .strict();
+export const MotionKeyframeSchema = z
+  .object({
+    id,
+    asset: id,
+    /** Frame index in the white-model video's own timeline (`fps`), 0-based. */
+    momentFrame: z.number().int().nonnegative(),
+    purpose: MotionUsageSchema,
+    note: z.string().trim().min(1).max(1000).optional(),
+  })
+  .strict();
+export const MotionReferenceSchema = z
+  .object({
+    ...common,
+    kind: z.literal("motion_reference"),
+    compositionId: id,
+    compositionRevision: revision,
+    shotId: id,
+    scene: RevisionPinSchema,
+    environmentVariant: id,
+    subjects: z.array(MotionSubjectSchema).max(50),
+    fps: z.number().int().positive().max(240),
+    durationFrames: revision,
+    video: MotionAssetSchema,
+    overview: MotionAssetSchema,
+    keyframes: z.array(MotionKeyframeSchema).min(1).max(100),
+    source: MotionAssetSchema,
+    usage: z.array(MotionUsageSchema).min(1).max(MOTION_USAGES.length),
+    provenance: z.string().trim().min(1).max(4000),
+    review: ReviewSchema.optional(),
+  })
+  .strict();
+export type MotionReference = z.infer<typeof MotionReferenceSchema>;
 export const MaterialDocumentSchema = z.discriminatedUnion("kind", [
   PolicyDocumentSchema,
   SceneDocumentSchema,
   ReferencePackSchema,
   StoryboardSequenceSchema,
+  MotionReferenceSchema,
 ]);
 export type MaterialDocument = z.infer<typeof MaterialDocumentSchema>;
 export const MaterialRevisionSchema = z
@@ -268,8 +320,41 @@ export const TargetCapabilitiesSchema = z
     maxImages: revision,
     roles: z.array(ReferencePurposeSchema).min(1),
     supportsGridSequence: z.boolean(),
+    /**
+     * Verified target ability to take a white-model motion reference. A missing
+     * `video` means the target was NOT verified to accept a reference video; the
+     * request must then choose the explicit keyframe delivery instead.
+     */
+    motion: z
+      .object({
+        video: z
+          .object({
+            maxVideos: revision,
+            maxDurationMs: revision.optional(),
+            usages: z.array(MotionUsageSchema).min(1),
+          })
+          .strict()
+          .optional(),
+        keyframes: z
+          .object({ usages: z.array(MotionUsageSchema).min(1) })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
+export const MotionInputRequestSchema = z
+  .object({
+    reference: RevisionPinSchema,
+    usage: z.array(MotionUsageSchema).min(1).max(MOTION_USAGES.length),
+    /** Explicit: `video` sends the whole white-model video; `keyframes` is a deliberate degrade. */
+    delivery: z.enum(["video", "keyframes"]),
+    /** Required, exact and non-empty for `keyframes`; invalid for `video`. */
+    keyframeIds: z.array(id).min(1).max(100).optional(),
+  })
+  .strict();
+export type MotionInputRequest = z.infer<typeof MotionInputRequestSchema>;
 export const GenerationInputRequestSchema = z
   .object({
     compositionId: id,
@@ -290,6 +375,7 @@ export const GenerationInputRequestSchema = z
       .min(1)
       .max(100),
     capabilities: TargetCapabilitiesSchema,
+    motion: MotionInputRequestSchema.optional(),
     prompt: z.string().trim().min(1),
     templateVersion: z.literal(AUTHORING_POLICY_VERSION),
   })
@@ -305,14 +391,55 @@ export interface ResolvedGenerationInput {
   source: ViewPin | { sequence: RevisionPin; panelId: string };
   sourceBoard?: string;
 }
+/** Exact motion input resolved from a pinned, approved motion_reference. Present only when requested. */
+export interface ResolvedMotionInput {
+  reference: RevisionPin;
+  /** SHA-256 of the canonical JSON of the pinned document, so a consumer can verify its copy. */
+  contentHash: string;
+  delivery: "video" | "keyframes";
+  usage: MotionUsage[];
+  scene: RevisionPin;
+  environmentVariant: string;
+  fps: number;
+  durationFrames: number;
+  video?: { asset: string; sha256: string };
+  keyframes?: Array<{
+    id: string;
+    asset: string;
+    sha256: string;
+    momentFrame: number;
+    purpose: MotionUsage;
+  }>;
+}
 export interface GenerationInputPacket {
   schemaVersion: AuthoringSchemaVersion;
   projectId: string;
   policyVersion: typeof AUTHORING_POLICY_VERSION;
   request: GenerationInputRequest;
   inputs: ResolvedGenerationInput[];
+  motion?: ResolvedMotionInput;
   hash: string;
 }
+const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+export const ActualMotionSchema = z
+  .object({
+    delivery: z.enum(["video", "keyframes"]),
+    video: z.object({ asset: id, sha256: Sha256Schema }).strict().optional(),
+    keyframes: z
+      .array(z.object({ asset: id, sha256: Sha256Schema }).strict())
+      .min(1)
+      .max(100)
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (v) =>
+      v.delivery === "video"
+        ? v.video !== undefined && v.keyframes === undefined
+        : v.keyframes !== undefined && v.video === undefined,
+    "delivery 'video' needs only video; delivery 'keyframes' needs only keyframes",
+  );
+export type ActualMotion = z.infer<typeof ActualMotionSchema>;
 export interface GenerationEvidence {
   id: string;
   projectId: string;
@@ -322,6 +449,8 @@ export interface GenerationEvidence {
     sha256: string;
     role: ReferencePurpose;
   }>;
+  /** Motion input the external run reports having used; absent = none reported. */
+  actualMotion?: ActualMotion;
   outputs: string[];
   method: "agent_reported" | "request_capture" | "manual_unknown";
   evidence: string;
@@ -341,7 +470,7 @@ export interface AuthoringValidation {
 }
 
 export const REQUIRED_REVIEW_CHECKS: Record<
-  ReferencePack["category"] | "scene" | "storyboard_sequence",
+  ReferencePack["category"] | "scene" | "storyboard_sequence" | "motion_reference",
   string[]
 > = {
   character_face: [
@@ -377,6 +506,14 @@ export const REQUIRED_REVIEW_CHECKS: Record<
     "state_consistent",
     "text_policy",
   ],
+  motion_reference: [
+    "whitebox_only",
+    "scene_geometry_match",
+    "subject_blocking_match",
+    "timing_verified",
+    "keyframes_match_video",
+    "text_policy",
+  ],
 };
 
 export function materialAssetIds(document: MaterialDocument): string[] {
@@ -400,6 +537,15 @@ export function materialAssetIds(document: MaterialDocument): string[] {
         ]),
       ]),
     ];
+  if (document.kind === "motion_reference")
+    return [
+      ...new Set([
+        document.video.asset,
+        document.overview.asset,
+        ...document.keyframes.map((k) => k.asset),
+        document.source.asset,
+      ]),
+    ];
   return [];
 }
 export function materialPins(document: MaterialDocument): RevisionPin[] {
@@ -415,6 +561,7 @@ export function materialPins(document: MaterialDocument): RevisionPin[] {
       p.scene,
       ...p.sources.map((s) => s.pack),
     ]);
+  if (document.kind === "motion_reference") return [document.scene];
   return [];
 }
 export function structuralMaterialDiagnostics(
@@ -584,6 +731,58 @@ export function structuralMaterialDiagnostics(
         "STORYBOARD_LAYOUT_INVALID",
         "board",
         "Grid dimensions must equal panel count.",
+      );
+  }
+  if (document.kind === "motion_reference") {
+    const timing = (path: string, message: string) =>
+      add("MOTION_TIMING_INVALID", path, message);
+    const keyframeIds = new Set<string>();
+    const moments = new Set<string>();
+    document.keyframes.forEach((k, i) => {
+      if (keyframeIds.has(k.id))
+        timing(`keyframes[${i}].id`, "Duplicate keyframe ID.");
+      keyframeIds.add(k.id);
+      if (k.momentFrame >= document.durationFrames)
+        timing(
+          `keyframes[${i}].momentFrame`,
+          "Keyframe moment must be inside the white-model video (momentFrame < durationFrames).",
+        );
+      const slot = `${k.momentFrame}:${k.purpose}`;
+      if (moments.has(slot))
+        timing(
+          `keyframes[${i}]`,
+          "Two keyframes cannot share the same moment and purpose.",
+        );
+      moments.add(slot);
+      if (!document.usage.includes(k.purpose))
+        add(
+          "MOTION_USAGE_INVALID",
+          `keyframes[${i}].purpose`,
+          "A keyframe purpose must be one of the declared usages.",
+        );
+    });
+    if (new Set(document.usage).size !== document.usage.length)
+      add(
+        "MOTION_USAGE_INVALID",
+        "usage",
+        "Declared usages must be unique.",
+      );
+    const assets = materialAssetIds(document);
+    if (
+      assets.length !==
+      document.keyframes.length + 3
+    )
+      add(
+        "REFERENCE_SCOPE_MISMATCH",
+        "assets",
+        "Video, overview, source and every keyframe need distinct assets; one asset serves one motion role.",
+      );
+    const subjectIds = new Set(document.subjects.map((s) => s.id));
+    if (subjectIds.size !== document.subjects.length)
+      add(
+        "REFERENCE_SCOPE_MISMATCH",
+        "subjects",
+        "Do not duplicate the same character/prop.",
       );
   }
   return out;

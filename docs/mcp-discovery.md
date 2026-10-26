@@ -42,3 +42,5 @@
 资料 Schema 中 `bounds` 使用固定四元素数字元组，Draft-07 导出为数组形式的 `items`。MCP 适配层现将固定、同构元组等价投影为对象形式的 `items`，保留 `minItems: 4`、`maxItems: 4` 及每项 0–1 约束。只影响 `authoring_document_put` / `reference_plan_validate` 的工具描述；协议 Schema、资源中的完整 Schema、REST 和领域校验保持原状。不同类型或非固定元组拒绝自动投影，必须明确设计兼容描述。
 
 E2E17 通过 HTTP tools/list 检查全部工具数组项格式，并用 Schema 验证器对比投影前后的合法值、错误长度、错误类型及越界数字。发布后必须再次通过 ChatGPT 管理页“刷新工具”，并在插件详情中确认可用工具实际出现。
+
+`motion_reference` and the `motion` request/evidence additions introduce no tuple-typed arrays, so the projection above is unchanged. E2E22 validates a real document against the resource schema and the projected `authoring_document_put` / `reference_plan_validate` schemas, checks the `generation_inputs_prepare` request and `generation_evidence_record` tool schemas, and asserts no `items` array anywhere in the tool list. The hosted ChatGPT "refresh tools" check remains a post-release verification.

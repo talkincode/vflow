@@ -21,6 +21,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Workbench } from "../../apps/web/src/Workbench.tsx";
 import { TEST_WORKER_AUTH } from "./auth-fixture.ts";
 import { seedReferences } from "./reference-fixture.ts";
+import { seedMotion } from "./motion-fixture.ts";
 import { projectComposition } from "./project-fixture.ts";
 import {
   HUMAN_READER_HEADERS,
@@ -540,6 +541,87 @@ describe("E2E 09 — Cloudflare D1/R2 持久化绑定、Static Assets 与空库�
       sqlite.prepare("SELECT COUNT(*) AS count FROM reference_documents").get()
         ?.count,
     ).toBe(6);
+    sqlite.close();
+  });
+  it("persists approved motion references, motion evidence and the white-model video across fresh Worker isolates", async () => {
+    const { d1, sqlite } = createSqliteD1Adapter();
+    const env: WorkerEnv = {
+      ...TEST_WORKER_AUTH,
+      DB: d1,
+      MEDIA_BUCKET: createR2BucketAdapter(),
+    };
+    const client = (headers: Record<string, string> = HUMAN_WRITER_HEADERS) =>
+      new VFlowClient({
+        baseUrl: "https://vflow.talkincode.net",
+        headers,
+        fetchFn: (input, init) =>
+          worker.fetch(new Request(String(input), init), env),
+      });
+    const fixture = await seedMotion(client());
+    const fresh = client();
+    await fresh.getAuthoringWorkflow("reference-test");
+    expect(
+      (await fresh.getAuthoringDocument("reference-test", "spell-motion", 3))
+        .document,
+    ).toEqual(fixture.motion.document);
+    const packet = (
+      await fresh.prepareGenerationInputs("reference-test", fixture.request)
+    ).packet!;
+    expect(packet.motion?.video?.asset).toBe("mo-video");
+    const evidence = await fresh.recordGenerationEvidence({
+      projectId: "reference-test",
+      id: "persisted-motion",
+      operationId: "persist-motion-evidence",
+      packet,
+      actualInputs: packet.inputs.map(({ asset, sha256, role }) => ({
+        asset,
+        sha256,
+        role,
+      })),
+      actualMotion: { delivery: "video", video: packet.motion!.video! },
+      outputs: ["panel-one"],
+      method: "agent_reported",
+      evidence: "Synthetic external report persisted across isolated calls.",
+    });
+    expect(evidence.matchesPlan).toBe(true);
+    expect((await client().listGenerationEvidence("reference-test"))[0]).toEqual(
+      evidence,
+    );
+    // The stored JSON row carries the document and the reported motion.
+    const rows = sqlite
+      .prepare(
+        "SELECT record_json FROM reference_documents WHERE id = 'spell-motion'",
+      )
+      .all() as Array<{ record_json: string }>;
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].record_json).revisions["3"].status).toBe(
+      "approved",
+    );
+    expect(
+      sqlite
+        .prepare("SELECT record_json FROM reference_evidence")
+        .get() as { record_json: string },
+    ).toMatchObject({ record_json: expect.stringContaining('"actualMotion"') });
+    // The video is streamed from R2 with byte ranges (player seeking) for readers too.
+    const range = await worker.fetch(
+      new Request(
+        "https://vflow.talkincode.net/v1/projects/reference-test/assets/mo-video/content",
+        { headers: { ...HUMAN_READER_HEADERS, range: "bytes=0-3" } },
+      ),
+      env,
+    );
+    expect(range.status).toBe(206);
+    expect(range.headers.get("content-type")).toBe("video/mp4");
+    expect((await range.arrayBuffer()).byteLength).toBe(4);
+    // D1 compare-and-swap: a stale base revision conflicts and leaves the approved head untouched.
+    await expect(
+      fresh.putAuthoringDocument({
+        projectId: "reference-test",
+        document: fixture.motion.document,
+        baseRevision: 1,
+        operationId: "stale-motion",
+      }),
+    ).rejects.toMatchObject({ code: "REVISION_CONFLICT" });
     sqlite.close();
   });
 });

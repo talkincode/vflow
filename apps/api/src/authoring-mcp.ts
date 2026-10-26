@@ -85,7 +85,7 @@ export const AUTHORING_TOOLS: McpToolDefinition[] = [
   {
     name: "authoring_document_list",
     description:
-      "List versioned scene, reference pack, storyboard and policy manifests.",
+      "List versioned scene, reference pack, storyboard, motion_reference (external dynamic white-model) and policy manifests.",
     inputSchema: {
       type: "object",
       properties: { projectId: project },
@@ -109,7 +109,7 @@ export const AUTHORING_TOOLS: McpToolDefinition[] = [
   {
     name: "authoring_document_put",
     description:
-      "Create a new immutable candidate revision after reading authoring_workflow_get. Full typed manifest; reviews supplied through CRUD are ignored. Images/crops must already be uploaded.",
+      "Create a new immutable candidate revision after reading authoring_workflow_get. Full typed manifest; reviews supplied through CRUD are ignored. Images/crops, and for kind motion_reference the white-model video, overview still, keyframes and source archive, must already be uploaded.",
     inputSchema: {
       type: "object",
       properties: { ...mutations, document: materialToolSchema },
@@ -125,7 +125,7 @@ export const AUTHORING_TOOLS: McpToolDefinition[] = [
   {
     name: "authoring_document_review",
     description:
-      "Explicit per-view/panel visual review, with evidence and pass/fail/unknown checks. Decoding success is not approval. Agents must use method external.",
+      "Explicit per-view/panel visual review, with evidence and pass/fail/unknown checks. Decoding success is not approval. A scene or motion_reference is reviewed whole with targets [\"$document\"]. Agents must use method external.",
     inputSchema: {
       type: "object",
       properties: {
@@ -189,7 +189,7 @@ export const AUTHORING_TOOLS: McpToolDefinition[] = [
   {
     name: "generation_inputs_prepare",
     description:
-      "Prepare exact approved input tiles and hashes for a pinned shot. Verify target capabilities, roles and count; never use whole grids as literal first frames. Does not generate or spend credits.",
+      "Prepare exact approved input tiles and hashes for a pinned shot. Verify target capabilities, roles and count; never use whole grids as literal first frames. Optional request.motion adds a pinned approved motion_reference: delivery 'video' needs capabilities.motion.video; the keyframe degrade must be chosen explicitly with keyframeIds and counts against the image budget. Does not generate or spend credits.",
     inputSchema: {
       type: "object",
       properties: {
@@ -213,6 +213,34 @@ export const AUTHORING_TOOLS: McpToolDefinition[] = [
         operationId: { type: "string" },
         packet: { type: "object" },
         actualInputs: { type: "array", items: { type: "object" } },
+        actualMotion: {
+          type: "object",
+          description:
+            "Motion input the external run really used (omit when none). delivery 'video' carries video; 'keyframes' carries keyframes in the order used. Compared with the packet's planned motion.",
+          properties: {
+            delivery: { enum: ["video", "keyframes"] },
+            video: {
+              type: "object",
+              properties: {
+                asset: { type: "string" },
+                sha256: { type: "string" },
+              },
+              required: ["asset", "sha256"],
+            },
+            keyframes: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  asset: { type: "string" },
+                  sha256: { type: "string" },
+                },
+                required: ["asset", "sha256"],
+              },
+            },
+          },
+          required: ["delivery"],
+        },
         outputs: { type: "array", items: { type: "string" } },
         method: {
           enum: ["agent_reported", "request_capture", "manual_unknown"],

@@ -2141,9 +2141,89 @@ summary {
   background: var(--raised);
   line-height: 1.8;
 }
+/* White-model motion reference: a playable evidence desk, not a 3D editor. */
+.motion-reference {
+  display: grid;
+  gap: 14px;
+  margin: 22px 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.motion-reference p,
+.motion-packet p {
+  margin: 0;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.motion-reference h4 {
+  margin: 4px 0 0;
+}
+.motion-reference-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.motion-reference-stage figure {
+  margin: 0;
+  min-width: 0;
+}
+.motion-reference-stage figcaption {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.motion-reference video,
+.motion-reference img,
+.motion-packet video,
+.motion-packet img {
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+}
+.motion-keyframes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.motion-keyframes li {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.motion-keyframes li span,
+.motion-keyframes li small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.motion-packet {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.motion-packet article {
+  min-width: 0;
+}
+.motion-plan input[type="checkbox"] {
+  width: auto;
+}
 @media (max-width: 900px) {
   .authoring-columns,
-  .reference-inspector {
+  .reference-inspector,
+  .motion-reference-stage {
     grid-template-columns: 1fr;
   }
   .authoring-workspace {

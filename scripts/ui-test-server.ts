@@ -5,6 +5,7 @@ import path from "node:path";
 import { createApiApp } from "../apps/api/src/app.ts";
 import { VFlowClient } from "../packages/client/src/index.ts";
 import { seedReferences } from "../tests/e2e/reference-fixture.ts";
+import { seedMotion } from "../tests/e2e/motion-fixture.ts";
 import { seedWorkbench } from "../tests/e2e/workbench-fixture.ts";
 import { seedProjectLibrary } from "../tests/e2e/project-fixture.ts";
 if (process.env.NODE_ENV === "production")
@@ -50,6 +51,20 @@ const server = createServer(async (request, response) => {
       });
       await seedReferences(client);
       response.end("reference fixture ready");
+      return;
+    }
+    if (
+      url.pathname === "/__test/motion-fixture" &&
+      request.method === "POST"
+    ) {
+      const client = new VFlowClient({
+        baseUrl: "http://localhost",
+        headers: writer,
+        fetchFn: (input, init) =>
+          backend.app.fetch(new Request(String(input), init)),
+      });
+      await seedMotion(client);
+      response.end("motion fixture ready");
       return;
     }
     if (url.pathname === "/__test/fail-next" && request.method === "POST") {

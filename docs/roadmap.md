@@ -12,7 +12,7 @@ vflow 是面向人和多个 Agent 的开源视频作品编排协议与轻量协�
 
 ## 当前能力清单
 - **开源仓库与文档**：GitHub Public 仓库已创建；README、AGENTS 和架构文档与代码实现保持同步。
-- **本地核心实现与验收**：`packages/protocol`、`packages/domain`、`packages/client`、`apps/api`、`apps/web` 及 15 套 E2E/集成测试（`tests/e2e/01` 至 `15`）已实现；真实 Chromium 检查覆盖项目/多编排导航、新建与失败恢复、合成图片/视频/音频、100 镜头、只读/可写角色和 360–1920 像素布局。
+- **本地核心实现与验收**：`packages/protocol`、`packages/domain`、`packages/client`、`apps/api`、`apps/web` 及 24 套 E2E/集成测试（`tests/e2e/01` 至 `24`）已实现；真实 Chromium 检查覆盖项目/多编排导航、新建与失败恢复、合成图片/视频/音频、100 镜头、只读/可写角色和 360–1920 像素布局。
 - **Cloudflare 生产环境（M4 已部署核验）**：子域名 `https://video-compose.talkincode.net`（现 canonical 为 `https://vflow.talkincode.net`，旧域保留兼容）、Cloudflare Access 可复用策略（SSO + Service Token）、D1（`video-compose-db`）与 R2（`video-compose-media`）真实绑定及线上端到端读写均已部署并实测通过。
 
 ## 非目标（铁律）
@@ -21,6 +21,7 @@ vflow 是面向人和多个 Agent 的开源视频作品编排协议与轻量协�
 - 不实现发布到 YouTube、社交平台或内容分发功能。
 - 不把供应商密钥、临时媒体 URL、模型推理参数变成强制协议字段。
 - 不把聊天日志当作项目编排权威数据，不允许静默最后写入覆盖。
+- 不内置 3D/白模渲染或编辑，不在 vflow 内执行 Blender、Three.js 等外部引擎；动态白模只作为外部产出的参考登记、审阅、固定、交付与证据核对。
 
 ## 方向与意图
 1. **项目与编排管理**：一个项目容纳多条独立编排，共享资产，采用极简的 `reader`（只读）与 `writer`（读写）两级项目权限模型。
@@ -65,6 +66,7 @@ vflow 是面向人和多个 Agent 的开源视频作品编排协议与轻量协�
 | 轻量工作台 | 本地已实现 | 中 | 是 | 是 | ✅ (三视图/功能图标与用途提示/保存状态/媒体/100 镜头/响应布局) | ✅ (只读禁写、保存失败、并发冲突、批量与排序失败) | ✅ (`writer`/`reader`，API 绕过拒绝) | ✅ (逐镜头草稿/原键重试/清空保存/局部撤销/批量原子回滚/排序重试/空库初始化) | `tests/e2e/07-lightweight-workbench.test.tsx`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx`, `tests/e2e/10-media-and-editor-recovery.test.tsx`, `tests/browser/workbench.spec.ts` |
 | 分镜素材图管理与上限限制 | 本地已实现 | 中 | 是 | 是 | ✅ (单镜头最多5张素材图、候选属性编辑、素材解除关联、未引用素材删除、工作台UI与MCP工具) | ✅ (单镜头超过5张素材图拒绝、协议校验拒绝、删除已引用资产拒绝) | ✅ (`writer` 可增改删，`reader` 拒绝写入和删除) | ✅ (超额添加保持原修订与候选不变，回滚保护) | `tests/e2e/13-shot-material-candidates.test.tsx` |
 | 类型化参考制作与无字序列 | 本地已实现，待发布 | 高 | 是 | 是 | ✅ (指导→分包→场景→序列→精确输入→实际记录) | ✅ (混合板、错归属/用途、未知审阅、非法宫格、超预算、循环、有损导出) | ✅ (`reader/writer/agent/非成员`；REST/MCP/资源/UI) | ✅ (put/review/approve/evidence 故障重试、并发/版本冲突、导入原子回滚、31+32 镜头保留) | `tests/e2e/14-reference-authoring.test.ts`, `tests/e2e/15-reference-integrity.test.ts`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx`, `tests/browser/reference-authoring.spec.ts`；[A01–A18 映射](reference-authoring.md#验收映射本地) |
+| 动态白模参考（`motion_reference`，L0 外部生成） | 本地已实现，待发布 | 高 | 是 | 是 | ✅ (提交→整体审阅→批准→固定到编排→准备输入包（整段视频）→回报实际使用→导出→导入→再次准备出同一输入；工作台播放白模视频与关键帧；纯 MCP 全生命周期) | ✅ (未审阅/缺检查/驳回、错媒体角色/未验证图/时长与关键帧越界、主体/场景/变体不符、身份图互斥复用、视频能力未明示不自动降级、关键帧降级须显式且计入预算、编排/主体/环境漂移、伪造 packet、缺依赖导入、v1 有损导出) | ✅ (`owner`/`writer` Agent、`reader`、非成员、匿名；工作台只读禁写；MCP 同权) | ✅ (put/review/approve/evidence/import 故障无半成品、幂等重试、CAS 冲突、D1 跨 isolate、UI 失败保留草稿) | `tests/e2e/18` 至 `24`、`tests/e2e/09`、`tests/browser/motion-reference.spec.ts`；[验收映射](reference-authoring.md#验收映射本地) |
 | JSON/YAML 交换 | 本地已实现 | 高 | 是 | 是 | ✅ | ✅ (损坏语法/缺失资产依赖原子拒绝) | ✅ (`reader` 可导出不可导入 / `writer` 可导入) | ✅ (导入失败保持目标项目原编排不变) | `tests/e2e/08-interchange-json-yaml.test.ts` |
 
 ### 已识别缺口和最低期望
@@ -83,6 +85,10 @@ vflow 是面向人和多个 Agent 的开源视频作品编排协议与轻量协�
 ## 参考制作工作流交付边界
 
 Issue #1 的协议、共享领域服务、MCP 指导/工具兜底、REST/client、工作台、D1 增量迁移及本地验收已实现。新项目默认 strict，旧项目保留 legacy 读取/整理路径。未对线上《旧桥分水》项目执行迁移、重建或生成。图片的同一身份、实际站位、无字与视频完整动作仍需有证据的人/外部视觉验收，不以结构校验或缩略图代替。详见 [参考制作](reference-authoring.md)。
+
+## 动态白模参考（L0）交付边界
+
+白模由外部工具生成并上传，vflow 只做登记、整体审阅、批准冻结、编排固定、输入包准备（目标工具视频能力必须明示，不支持时只能显式选择关键帧降级且不丢弃）、实际使用证据与导出/导入。协议为 `vflow/reference-workflow/v1` 资料联合体的 additive `kind`，`vflow/v1` 读写不变，无 D1 迁移，核心无厂商字段。范围：L0 只支持完整镜头参考，白模秒数必须与镜头相同；动作文字（description/prompts）、dependsOn、时长、主体、format、场景修订变化视为漂移，候选与选定输出不算。限制：平台不解码视频，fps/时长/画面语义是声明加人工完整播放审阅，只有上传登记的 `durationFrames` 被机械核对；真实 Chromium 只证明能解码、播放和拖动。尚未发布，未接触线上项目数据。详见 [参考制作](reference-authoring.md#动态白模参考motion_referencel0)。
 
 ## 用户私有工作区与回收站
 

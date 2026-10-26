@@ -1,6 +1,8 @@
 import { isTrashed, assertCompositionActive } from "./lifecycle.ts";
 import {
+  ActualMotionSchema,
   AUTHORING_POLICY_VERSION,
+  MOTION_USAGES,
   AUTHORING_PROMPTS,
   AUTHORING_RULES,
   AUTHORING_VERSION,
@@ -24,7 +26,10 @@ import {
   type MaterialDocument,
   type MaterialRecord,
   type MaterialRevision,
+  type MotionReference,
+  type MotionUsage,
   type ReferenceOwner,
+  type ResolvedMotionInput,
   type RevisionPin,
   type WorkflowContext,
 } from "@vflow/protocol";
@@ -238,6 +243,260 @@ function imageRejectedAfter(
   return rejected;
 }
 
+
+/** True when PNG/JPEG header dimensions were parsed from the uploaded bytes. */
+function dimensionsUnverified(image: import("./types.ts").AssetRecord): boolean {
+  return (
+    !image.width ||
+    !image.height ||
+    (image.lineage?.mediaDimensions as { verified?: boolean } | undefined)
+      ?.verified !== true
+  );
+}
+/** A shot's subject bindings with omitted variants resolved to the pinned revision default. */
+export function resolvedShotSubjects(
+  state: State,
+  projectId: string,
+  shot: { subjects: Array<{ subjectId: string; subjectRevision: number; variant?: string }> },
+): string[] {
+  return shot.subjects
+    .map(
+      (b) =>
+        `${b.subjectId}@${b.subjectRevision}/${
+          b.variant ??
+          state.subjects[key(projectId, b.subjectId)]?.revisions[
+            b.subjectRevision
+          ]?.defaultVariant ??
+          "?"
+        }`,
+    )
+    .sort();
+}
+const motionOwnerKey = (o: { id: string; revision: number; variant: string }) =>
+  `${o.id}@${o.revision}/${o.variant}`;
+/** Assets that approved canonical material (identity/environment packs, storyboard panels) already owns. */
+function canonicalAssetIds(state: State, projectId: string): Set<string> {
+  return new Set(
+    Object.values(state.materials)
+      .filter((r) => r.projectId === projectId)
+      .flatMap((r) => Object.values(r.revisions))
+      .filter(
+        (rev) =>
+          rev.status === "approved" &&
+          (rev.document.kind === "reference_pack" ||
+            rev.document.kind === "storyboard_sequence"),
+      )
+      .flatMap((rev) => materialAssetIds(rev.document)),
+  );
+}
+/** Assets owned by approved motion references; they can never also be canonical identity/panel images. */
+function motionAssetIds(state: State, projectId: string): Set<string> {
+  return new Set(
+    Object.values(state.materials)
+      .filter((r) => r.projectId === projectId)
+      .flatMap((r) => Object.values(r.revisions))
+      .filter(
+        (rev) => rev.status === "approved" && rev.document.kind === "motion_reference",
+      )
+      .flatMap((rev) => materialAssetIds(rev.document)),
+  );
+}
+/** Assets already used as Subject reference images in any revision of this project. */
+function subjectReferenceAssetIds(state: State, projectId: string): Set<string> {
+  return new Set(
+    Object.values(state.subjects)
+      .filter((subject) => subject.projectId === projectId)
+      .flatMap((subject) => Object.values(subject.revisions))
+      .flatMap((revision) => Object.values(revision.variants))
+      .flatMap((variant) => variant.referencePack.map((entry) => entry.asset)),
+  );
+}
+/**
+ * Every Subject writer (create, patch, attach, approve, import) calls this: media owned by an
+ * approved motion reference can never become a Subject reference image, in strict or legacy projects.
+ */
+export function assertNoMotionReferenceAssets(
+  state: State,
+  projectId: string,
+  subject: import("@vflow/protocol").SubjectSnapshot,
+): void {
+  const motion = motionAssetIds(state, projectId);
+  for (const variant of Object.values(subject.variants))
+    for (const entry of variant.referencePack)
+      if (motion.has(entry.asset))
+        throw new DomainError(
+          "REFERENCE_SCOPE_MISMATCH",
+          "This asset belongs to an approved motion reference and cannot become a Subject reference image.",
+          { asset: entry.asset, subjectId: subject.id },
+        );
+}
+function motionDiagnostics(
+  state: State,
+  projectId: string,
+  doc: MotionReference,
+  visual: boolean,
+): AuthoringDiagnostic[] {
+  const out: AuthoringDiagnostic[] = [];
+  const add = (code: string, path: string, message: string, action?: string) =>
+    out.push(diagnostic(code, path, message, action));
+  const asset = (id: string) => state.assets[key(projectId, id)];
+  const video = asset(doc.video.asset);
+  if (!video?.mimeType.startsWith("video/"))
+    add(
+      "MISSING_ASSET_REFERENCE",
+      "video.asset",
+      "The white-model video must be an uploaded video/* asset in this project.",
+      "Upload the externally rendered video as a new immutable asset first.",
+    );
+  else if (
+    video.durationFrames !== undefined &&
+    video.durationFrames !== doc.durationFrames
+  )
+    add(
+      "MOTION_TIMING_INVALID",
+      "video.asset",
+      `The video asset was registered with durationFrames ${video.durationFrames}, but this document declares ${doc.durationFrames} at ${doc.fps} fps.`,
+      "Correct the declared fps/durationFrames or register the intended video.",
+    );
+  const stills: Array<[string, string]> = [
+    ["overview.asset", doc.overview.asset],
+    ...doc.keyframes.map((k, i): [string, string] => [
+      `keyframes[${i}].asset`,
+      k.asset,
+    ]),
+  ];
+  for (const [path, id] of stills) {
+    const image = asset(id);
+    if (!image?.mimeType.startsWith("image/"))
+      add(
+        "MISSING_ASSET_REFERENCE",
+        path,
+        "A required image asset is missing in this project.",
+      );
+    else if (dimensionsUnverified(image))
+      add(
+        "MEDIA_DIMENSIONS_UNVERIFIED",
+        path,
+        "Image dimensions were not parsed from the uploaded media.",
+        "Upload a supported PNG/JPEG or re-register the original bytes with a new immutable asset ID.",
+      );
+  }
+  if (!asset(doc.source.asset))
+    add(
+      "MISSING_ASSET_REFERENCE",
+      "source.asset",
+      "The archived source project must be an uploaded asset in this project.",
+    );
+
+  const baseline =
+    state.compositions[key(projectId, doc.compositionId)]?.revisions[
+      doc.compositionRevision
+    ]?.document;
+  const shot = baseline?.shots[doc.shotId];
+  if (!baseline)
+    add(
+      "DEPENDENCY_ERROR",
+      "compositionRevision",
+      "Motion composition revision is missing.",
+    );
+  else if (!shot)
+    add(
+      "DEPENDENCY_ERROR",
+      "shotId",
+      "Motion shot does not exist in the pinned composition revision.",
+    );
+  else {
+    // L0 covers the whole shot: no offset/range fields exist, so the seconds must be equal.
+    if (shot.durationFrames === undefined)
+      add(
+        "MOTION_TIMING_INVALID",
+        "shotId",
+        "A whole-shot motion reference needs the pinned shot to declare durationFrames.",
+      );
+    else if (
+      doc.durationFrames * baseline.format.fps !==
+      shot.durationFrames * doc.fps
+    )
+      add(
+        "MOTION_TIMING_INVALID",
+        "durationFrames",
+        `The white-model video lasts ${doc.durationFrames}f@${doc.fps} but the pinned shot lasts ${shot.durationFrames}f@${baseline.format.fps}; an L0 motion reference covers the whole shot, so both must be the same number of seconds (frame 0 aligns with the shot start).`,
+      );
+    const expected = resolvedShotSubjects(state, projectId, shot);
+    const declared = doc.subjects.map(motionOwnerKey).sort();
+    for (const k of expected.filter((e) => !declared.includes(e)))
+      add(
+        "REFERENCE_SCOPE_MISMATCH",
+        "subjects",
+        `Declare every pinned shot participant; missing ${k}.`,
+      );
+    for (const k of declared.filter((d) => !expected.includes(d)))
+      add(
+        "REFERENCE_SCOPE_MISMATCH",
+        "subjects",
+        `${k} is not bound to this shot at the pinned composition revision.`,
+      );
+  }
+  out.push(
+    ...ownerDiagnostics(
+      state,
+      projectId,
+      {
+        kind: "scene",
+        id: doc.scene.id,
+        revision: doc.scene.revision,
+        variant: doc.environmentVariant,
+      },
+      visual,
+    ),
+  );
+  for (const subject of doc.subjects)
+    out.push(...ownerDiagnostics(state, projectId, subject, visual));
+  if (visual) {
+    out.push(...reviewDiagnostics(doc.review, "motion_reference", "review"));
+    const canonical = canonicalAssetIds(state, projectId);
+    for (const id of subjectReferenceAssetIds(state, projectId))
+      canonical.add(id);
+    for (const id of materialAssetIds(doc))
+      if (canonical.has(id))
+        add(
+          "REFERENCE_SCOPE_MISMATCH",
+          `assets.${id}`,
+          "This asset is already canonical identity/environment/storyboard material or a Subject reference image. A motion reference carries motion evidence only; upload independently produced frames.",
+        );
+  }
+  return out;
+}
+
+function motionNotAnInput(path: string): AuthoringDiagnostic {
+  return diagnostic(
+    "REFERENCE_USAGE_AMBIGUOUS",
+    path,
+    "A motion reference carries motion evidence only; it cannot be an identity, environment, first-frame or last-frame input.",
+    "Supply it through request.motion with an explicit delivery.",
+  );
+}
+/** A later explicit rejection removes production eligibility; pending edits cannot restore it. */
+function motionRejectedAfter(
+  state: State,
+  projectId: string,
+  pin: RevisionPin,
+): boolean {
+  let rejected = false;
+  const later = Object.values(
+    state.materials[key(projectId, pin.id)]?.revisions ?? {},
+  )
+    .filter((r) => r.revision > pin.revision)
+    .sort((a, b) => a.revision - b.revision);
+  for (const r of later) {
+    if (r.document.kind !== "motion_reference") continue;
+    if (r.document.review?.decision === "rejected") rejected = true;
+    else if (r.status === "approved" && r.document.review?.decision === "accepted")
+      rejected = false;
+  }
+  return rejected;
+}
+
 export function validateMaterial(
   state: State,
   projectId: string,
@@ -247,15 +506,34 @@ export function validateMaterial(
   const diagnostics = structuralMaterialDiagnostics(document);
   const add = (d: AuthoringDiagnostic) => diagnostics.push(d);
   const asset = (id: string) => state.assets[key(projectId, id)];
-  for (const id of materialAssetIds(document))
-    if (!asset(id)?.mimeType.startsWith("image/"))
-      add(
-        diagnostic(
-          "MISSING_ASSET_REFERENCE",
-          `assets.${id}`,
-          "A required image asset is missing in this project.",
-        ),
-      );
+  if (document.kind !== "motion_reference")
+    for (const id of materialAssetIds(document))
+      if (!asset(id)?.mimeType.startsWith("image/"))
+        add(
+          diagnostic(
+            "MISSING_ASSET_REFERENCE",
+            `assets.${id}`,
+            "A required image asset is missing in this project.",
+          ),
+        );
+  if (document.kind === "motion_reference")
+    diagnostics.push(...motionDiagnostics(state, projectId, document, visual));
+  if (
+    visual &&
+    (document.kind === "reference_pack" ||
+      document.kind === "storyboard_sequence")
+  ) {
+    const motion = motionAssetIds(state, projectId);
+    for (const id of materialAssetIds(document))
+      if (motion.has(id))
+        add(
+          diagnostic(
+            "REFERENCE_SCOPE_MISMATCH",
+            `assets.${id}`,
+            "This asset belongs to an approved motion reference and cannot become an identity, environment or first/last-frame image.",
+          ),
+        );
+  }
   const items =
     document.kind === "reference_pack"
       ? document.views
@@ -268,13 +546,7 @@ export function validateMaterial(
   }> = [];
   for (const item of items) {
     const image = asset(item.asset);
-    if (
-      image &&
-      (!image.width ||
-        !image.height ||
-        (image.lineage?.mediaDimensions as { verified?: boolean } | undefined)
-          ?.verified !== true)
-    )
+    if (image && dimensionsUnverified(image))
       add(
         diagnostic(
           "MEDIA_DIMENSIONS_UNVERIFIED",
@@ -750,6 +1022,7 @@ export class ReferenceAuthoringService {
         "approve reference packs",
         "pin storyboard sources",
         "review text-free panels",
+        "optionally register, review and approve an external white-model motion reference",
         "prepare exact generation inputs",
         "record actual input evidence",
       ],
@@ -997,7 +1270,8 @@ export class ReferenceAuthoringService {
             );
         }
         // Reviews cannot be supplied through CRUD. Unchanged items may retain their recorded review.
-        if (doc.kind === "scene") delete doc.review;
+        if (doc.kind === "scene" || doc.kind === "motion_reference")
+          delete doc.review;
         if (
           doc.kind === "reference_pack" ||
           doc.kind === "storyboard_sequence"
@@ -1115,11 +1389,11 @@ export class ReferenceAuthoringService {
             "Accepted reviews must explicitly pass every required check.",
             { requiredChecks: REQUIRED_REVIEW_CHECKS[category] },
           );
-        if (doc.kind === "scene") {
+        if (doc.kind === "scene" || doc.kind === "motion_reference") {
           if (input.targets.length !== 1 || input.targets[0] !== "$document")
             throw new DomainError(
               "VALIDATION_FAILED",
-              "Review scene as $document.",
+              `Review a ${doc.kind} as $document.`,
             );
           doc.review = review;
         } else {
@@ -1298,6 +1572,10 @@ export class ReferenceAuthoringService {
       if (item.source) {
         const material = materialRevision(state, projectId, item.source.pack);
         const pack = material?.document;
+        if (pack?.kind === "motion_reference") {
+          diagnostics.push(motionNotAnInput(path));
+          continue;
+        }
         if (
           !material ||
           material.status !== "approved" ||
@@ -1375,6 +1653,10 @@ export class ReferenceAuthoringService {
       } else if (item.sequence && item.panelId) {
         const material = materialRevision(state, projectId, item.sequence),
           seq = material?.document;
+        if (seq?.kind === "motion_reference") {
+          diagnostics.push(motionNotAnInput(path));
+          continue;
+        }
         if (
           !material ||
           material.status !== "approved" ||
@@ -1468,7 +1750,13 @@ export class ReferenceAuthoringService {
           ...(sourceBoard ? { sourceBoard } : {}),
         });
     }
-    if (inputs.length > request.capabilities.maxImages)
+    let motion: ResolvedMotionInput | undefined;
+    if (request.motion) {
+      const resolved = await this.resolveMotion(state, projectId, request, pinned, comp, shot);
+      diagnostics.push(...resolved.diagnostics);
+      motion = resolved.motion;
+    }
+    if (inputs.length + (motion?.keyframes?.length ?? 0) > request.capabilities.maxImages)
       diagnostics.push(
         diagnostic(
           "REFERENCE_BUDGET_EXCEEDED",
@@ -1494,6 +1782,7 @@ export class ReferenceAuthoringService {
       policyVersion: AUTHORING_POLICY_VERSION,
       request,
       inputs,
+      ...(motion ? { motion } : {}),
     };
     return {
       ready: true,
@@ -1506,6 +1795,212 @@ export class ReferenceAuthoringService {
       },
     };
   }
+  /**
+   * Resolve request.motion against one pinned, approved motion_reference.
+   * Every degrade is explicit: nothing is substituted, truncated or dropped; a request
+   * that cannot be satisfied exactly yields diagnostics and no packet.
+   */
+  private async resolveMotion(
+    state: State,
+    projectId: string,
+    request: GenerationInputPacket["request"],
+    pinned: ReadonlySet<string>,
+    comp: import("@vflow/protocol").CompositionDocument | undefined,
+    shot: import("@vflow/protocol").ShotDefinition | undefined,
+  ): Promise<{ diagnostics: AuthoringDiagnostic[]; motion?: ResolvedMotionInput }> {
+    const asked = request.motion!;
+    const out: AuthoringDiagnostic[] = [];
+    const bad = (code: string, path: string, message: string, action?: string) =>
+      out.push(diagnostic(code, `motion${path ? `.${path}` : ""}`, message, action));
+    const pin = asked.reference;
+    if (!pinned.has(`${pin.id}@${pin.revision}`)) {
+      bad(
+        "REFERENCE_SCOPE_MISMATCH",
+        "reference",
+        "Motion reference revision is not pinned to this composition.",
+        "Pin the approved motion reference with set_authoring, then prepare using the new composition revision.",
+      );
+      return { diagnostics: out };
+    }
+    const material = materialRevision(state, projectId, pin);
+    const doc = material?.document;
+    if (doc?.kind !== "motion_reference") {
+      bad("REFERENCE_SCOPE_MISMATCH", "reference", "The pinned revision is not a motion reference.");
+      return { diagnostics: out };
+    }
+    if (material!.status !== "approved") {
+      bad("REFERENCE_REVIEW_REQUIRED", "reference", "Motion reference must be an approved fixed revision.");
+      return { diagnostics: out };
+    }
+    out.push(...validateMaterial(state, projectId, doc).diagnostics);
+    if (motionRejectedAfter(state, projectId, pin))
+      bad(
+        "REFERENCE_REVIEW_REQUIRED",
+        "reference",
+        "This motion reference was rejected in a later revision; only an explicit approved review can restore production eligibility.",
+      );
+
+    // Drift: the shot the white model was authored for must still be the shot being generated.
+    const drift = (message: string) =>
+      bad(
+        "MOTION_BASELINE_DRIFT",
+        "reference",
+        message,
+        "Author and approve a new motion reference against the current composition revision, then pin it.",
+      );
+    const baseline =
+      state.compositions[key(projectId, doc.compositionId)]?.revisions[
+        doc.compositionRevision
+      ]?.document;
+    const baselineShot = baseline?.shots[doc.shotId];
+    if (doc.compositionId !== request.compositionId || doc.shotId !== request.shotId)
+      drift(
+        `The motion reference is fixed to ${doc.compositionId}/${doc.shotId}, not ${request.compositionId}/${request.shotId}.`,
+      );
+    else if (baseline && baselineShot && comp && shot) {
+      if (baselineShot.durationFrames !== shot.durationFrames)
+        drift(
+          `Shot duration changed from ${baselineShot.durationFrames} to ${shot.durationFrames} frames since the motion baseline.`,
+        );
+      if (
+        canonicalizeJson(resolvedShotSubjects(state, projectId, shot)) !==
+        canonicalizeJson(doc.subjects.map(motionOwnerKey).sort())
+      )
+        drift("The shot's pinned subjects/variants differ from the motion reference's subjects.");
+      if (canonicalizeJson(baseline.format) !== canonicalizeJson(comp.format))
+        drift("The composition format (size/fps) changed since the motion baseline.");
+      // Design intent is part of the baseline; production results (candidates/selected) are not.
+      if (baselineShot.description !== shot.description)
+        drift("The shot description changed since the motion baseline.");
+      if (canonicalizeJson(baselineShot.prompts) !== canonicalizeJson(shot.prompts))
+        drift("The shot prompts changed since the motion baseline.");
+      const edges = (s: typeof shot) => s.dependsOn.map((d) => canonicalizeJson(d)).sort();
+      if (canonicalizeJson(edges(baselineShot)) !== canonicalizeJson(edges(shot)))
+        drift("The shot dependsOn edges changed since the motion baseline.");
+      const scenePin = comp.authoring?.materials.find((m) => m.id === doc.scene.id);
+      if (scenePin && scenePin.revision !== doc.scene.revision)
+        drift(
+          `The composition pins scene ${scenePin.id}@${scenePin.revision}, but the motion reference was authored against ${doc.scene.id}@${doc.scene.revision}.`,
+        );
+    }
+
+    const usage = [...asked.usage];
+    if (new Set(usage).size !== usage.length)
+      bad("REFERENCE_USAGE_AMBIGUOUS", "usage", "Requested usages must be unique.");
+    const undeclared = usage.filter((u) => !doc.usage.includes(u));
+    if (undeclared.length)
+      bad(
+        "MOTION_USAGE_UNSUPPORTED",
+        "usage",
+        `The motion reference does not declare usage: ${undeclared.join(", ")}.`,
+      );
+    const caps = request.capabilities.motion;
+    const sha = (assetId: string) => state.assets[key(projectId, assetId)]?.sha256;
+    let video: ResolvedMotionInput["video"];
+    let keyframes: ResolvedMotionInput["keyframes"];
+    if (asked.delivery === "video") {
+      if (asked.keyframeIds)
+        bad(
+          "MOTION_DELIVERY_AMBIGUOUS",
+          "keyframeIds",
+          "keyframeIds belong to delivery 'keyframes'; whole-video delivery sends no keyframes.",
+        );
+      if (!caps?.video)
+        bad(
+          "MOTION_VIDEO_CAPABILITY_REQUIRED",
+          "capabilities",
+          "The target's reference-video capability was not verified.",
+          "Verify the target accepts a reference video and declare capabilities.motion.video, or deliberately request delivery 'keyframes' with explicit keyframeIds.",
+        );
+      else {
+        const unsupported = usage.filter((u) => !caps.video!.usages.includes(u));
+        if (unsupported.length)
+          bad(
+            "MOTION_USAGE_UNSUPPORTED",
+            "capabilities.video.usages",
+            `The target video capability does not cover: ${unsupported.join(", ")}.`,
+          );
+        if (
+          caps.video.maxDurationMs !== undefined &&
+          doc.durationFrames * 1000 > caps.video.maxDurationMs * doc.fps
+        )
+          bad(
+            "MOTION_VIDEO_LIMIT_EXCEEDED",
+            "capabilities.video.maxDurationMs",
+            `The white-model video lasts ${(doc.durationFrames / doc.fps).toFixed(3)}s, over the verified target limit; it is never trimmed silently.`,
+          );
+      }
+      const digest = sha(doc.video.asset);
+      if (digest) video = { asset: doc.video.asset, sha256: digest };
+    } else {
+      if (!caps?.keyframes)
+        bad(
+          "MOTION_KEYFRAME_CAPABILITY_REQUIRED",
+          "capabilities",
+          "The target's ability to take motion keyframe images was not verified.",
+        );
+      else {
+        const unsupported = usage.filter((u) => !caps.keyframes!.usages.includes(u));
+        if (unsupported.length)
+          bad(
+            "MOTION_USAGE_UNSUPPORTED",
+            "capabilities.keyframes.usages",
+            `The target keyframe capability does not cover: ${unsupported.join(", ")}.`,
+          );
+      }
+      const ids = asked.keyframeIds ?? [];
+      if (!ids.length)
+        bad(
+          "MOTION_KEYFRAMES_REQUIRED",
+          "keyframeIds",
+          "Delivering keyframes is an explicit degrade: name the exact keyframe IDs to send.",
+        );
+      if (new Set(ids).size !== ids.length)
+        bad("MOTION_KEYFRAMES_REQUIRED", "keyframeIds", "Keyframe IDs must be unique.");
+      const unknown = ids.filter((id) => !doc.keyframes.some((k) => k.id === id));
+      if (unknown.length)
+        bad("MOTION_KEYFRAMES_REQUIRED", "keyframeIds", `Unknown keyframe IDs: ${unknown.join(", ")}.`);
+      const chosen = doc.keyframes
+        .filter((k) => ids.includes(k.id))
+        .sort((a, b) => a.momentFrame - b.momentFrame || a.id.localeCompare(b.id));
+      for (const k of chosen.filter((c) => !usage.includes(c.purpose)))
+        bad(
+          "MOTION_USAGE_UNSUPPORTED",
+          "keyframeIds",
+          `Keyframe ${k.id} serves '${k.purpose}', which this request did not ask for.`,
+        );
+      for (const u of usage.filter((u) => !chosen.some((c) => c.purpose === u)))
+        bad(
+          "MOTION_KEYFRAMES_REQUIRED",
+          "keyframeIds",
+          `Requested usage '${u}' has no selected keyframe and would be silently lost; select one or narrow the request.`,
+        );
+      keyframes = chosen.flatMap((k) => {
+        const digest = sha(k.asset);
+        return digest
+          ? [{ id: k.id, asset: k.asset, sha256: digest, momentFrame: k.momentFrame, purpose: k.purpose }]
+          : [];
+      });
+    }
+    if (out.length) return { diagnostics: out };
+    return {
+      diagnostics: out,
+      motion: {
+        reference: pin,
+        contentHash: await computeSha256Hex(
+          new TextEncoder().encode(canonicalizeJson(doc)),
+        ),
+        delivery: asked.delivery,
+        usage: MOTION_USAGES.filter((u) => usage.includes(u as MotionUsage)) as MotionUsage[],
+        scene: doc.scene,
+        environmentVariant: doc.environmentVariant,
+        fps: doc.fps,
+        durationFrames: doc.durationFrames,
+        ...(video ? { video } : {}),
+        ...(keyframes ? { keyframes } : {}),
+      },
+    };
+  }
   async recordEvidence(
     actor: ActorIdentity | null | undefined,
     input: {
@@ -1515,6 +2010,7 @@ export class ReferenceAuthoringService {
       workflowContext?: WorkflowContext;
       packet: GenerationInputPacket;
       actualInputs: GenerationEvidence["actualInputs"];
+      actualMotion?: GenerationEvidence["actualMotion"];
       outputs: string[];
       method: GenerationEvidence["method"];
       evidence: string;
@@ -1576,6 +2072,25 @@ export class ReferenceAuthoringService {
           "VALIDATION_FAILED",
           "Invalid actual input evidence.",
         );
+      const actualMotion =
+        input.actualMotion === undefined
+          ? undefined
+          : ActualMotionSchema.safeParse(input.actualMotion);
+      if (
+        actualMotion &&
+        (!actualMotion.success ||
+          [
+            ...(actualMotion.data.video ? [actualMotion.data.video] : []),
+            ...(actualMotion.data.keyframes ?? []),
+          ].some(
+            (a) =>
+              draft.assets[key(input.projectId, a.asset)]?.sha256 !== a.sha256,
+          ))
+      )
+        throw new DomainError(
+          "VALIDATION_FAILED",
+          "Invalid actual motion evidence: a delivery with its matching assets and recorded hashes is required.",
+        );
       const k = key(input.projectId, input.id),
         receiptKey = canonicalizeJson([
           "authoring-evidence",
@@ -1604,11 +2119,30 @@ export class ReferenceAuthoringService {
         sha256,
         role,
       }));
+      // What the plan said would be delivered; an unplanned or missing motion input is a mismatch.
+      const planned = input.packet.motion;
+      const expectedMotion = planned
+        ? {
+            delivery: planned.delivery,
+            ...(planned.video
+              ? { video: { asset: planned.video.asset, sha256: planned.video.sha256 } }
+              : {}),
+            ...(planned.keyframes
+              ? {
+                  keyframes: planned.keyframes.map(({ asset, sha256 }) => ({
+                    asset,
+                    sha256,
+                  })),
+                }
+              : {}),
+          }
+        : null;
       const record: GenerationEvidence = {
         id: input.id,
         projectId: input.projectId,
         packet: input.packet,
         actualInputs: input.actualInputs,
+        ...(actualMotion?.success ? { actualMotion: actualMotion.data } : {}),
         outputs: input.outputs,
         method: input.method,
         evidence: input.evidence,
@@ -1616,7 +2150,9 @@ export class ReferenceAuthoringService {
         createdAt: new Date().toISOString(),
         matchesPlan:
           input.method !== "manual_unknown" &&
-          canonicalizeJson(expected) === canonicalizeJson(input.actualInputs),
+          canonicalizeJson(expected) === canonicalizeJson(input.actualInputs) &&
+          canonicalizeJson(expectedMotion) ===
+            canonicalizeJson(actualMotion?.success ? actualMotion.data : null),
       };
       draft.generationEvidence[k] = record;
       draft.idempotencyRecords[receiptKey] = { fingerprint, result: record };

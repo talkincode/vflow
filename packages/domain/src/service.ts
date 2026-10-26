@@ -10,6 +10,7 @@ import {
   ReferenceAuthoringService,
   initialProjectPolicy,
   assertWorkflowContext,
+  assertNoMotionReferenceAssets,
   assertStrictSubjectReferences,
   isStrictProject,
   materialRevision,
@@ -889,6 +890,10 @@ export class VFlowDomainService {
               ...r.outputs,
               ...r.actualInputs.map((a) => a.asset),
               ...r.packet.inputs.map((a) => a.asset),
+              ...(r.packet.motion?.video ? [r.packet.motion.video.asset] : []),
+              ...(r.packet.motion?.keyframes ?? []).map((k) => k.asset),
+              ...(r.actualMotion?.video ? [r.actualMotion.video.asset] : []),
+              ...(r.actualMotion?.keyframes ?? []).map((k) => k.asset),
             ].includes(assetId),
         )
       ) {
@@ -1006,6 +1011,7 @@ export class VFlowDomainService {
         );
       }
 
+      assertNoMotionReferenceAssets(draft, input.projectId, snapshot);
       if (snapshot.status === "approved")
         assertStrictSubjectReferences(
           draft,
@@ -1164,6 +1170,7 @@ export class VFlowDomainService {
         );
       }
 
+      assertNoMotionReferenceAssets(draft, input.projectId, snapshot);
       subject.revisions[nextRevision] = snapshot;
       subject.latestRevision = nextRevision;
       subject.name = snapshot.name;
@@ -1302,6 +1309,7 @@ export class VFlowDomainService {
         );
       }
 
+      assertNoMotionReferenceAssets(draft, input.projectId, snapshot);
       assertStrictSubjectReferences(
         draft,
         input.projectId,
@@ -2184,7 +2192,11 @@ export class VFlowDomainService {
         referencedAssetIds.add(id),
       );
       materialPins(ref.document).forEach(collectMaterial);
-      if (ref.document.kind === "storyboard_sequence") {
+      if (
+        ref.document.kind === "storyboard_sequence" ||
+        ref.document.kind === "motion_reference"
+      ) {
+        // Both pin an exact composition revision that a consumer needs to interpret them.
         const seq = ref.document;
         assertCompositionActive(state, input.projectId, seq.compositionId);
         const baseline =
@@ -2268,7 +2280,9 @@ export class VFlowDomainService {
             ? ref.document.panels.flatMap((p) =>
                 p.entities.map((e) => e.subject),
               )
-            : [];
+            : ref.document.kind === "motion_reference"
+              ? ref.document.subjects
+              : [];
       for (const owner of owners)
         if (owner.kind !== "scene") {
           const subject =
@@ -2509,6 +2523,8 @@ export class VFlowDomainService {
         record.headRevision = Math.max(record.headRevision, imported.revision);
         draft.materials[mk] = record;
       }
+      for (const subjSnap of bundle.dependencies.subjects)
+        assertNoMotionReferenceAssets(draft, input.projectId, subjSnap);
       for (const baseline of bundle.dependencies.compositionBaselines ?? []) {
         const ck = compositeKey(input.projectId, baseline.id);
         const document = {
