@@ -66,6 +66,10 @@ Unsaved descriptions, durations and prompts live per shot in the current page, r
 
 Session undo applies an inverse patch only to fields edited by that session, checks that those fields have not changed since the saved operation, and preserves concurrent unrelated changes. It does not restore entire historical snapshots or toggle between two revisions. Batch duration changes use a single typed patch and sequence ordering uses stable shot IDs with relative anchors. These adapters use existing domain contracts; this UI release changes no portable schema or database migration.
 
+## External filmkit handoff
+
+The protocol adapter exposes a pure `inspectCompositionDelivery` structural prerequisite check (durations, selected media and audio bounds). The web source tab uses it to show blockers and a shell-quoted, fixed-revision command. It adds no execution or write endpoint. filmkit's standalone reader owns its target conversion: existing production import remains default, explicit assemble uses fixed durations and selected audio/video with ordinary local ffmpeg nodes for source audio trims. Full file download, target validation and visual review remain separate gates. See [filmkit handoff](filmkit.md) for behavior, acceptance and rollback.
+
 ## Source layout
 ```
 apps/web/                # React Vite workspace
