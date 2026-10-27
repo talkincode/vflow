@@ -15,7 +15,7 @@ vflow 管设计、素材及审阅；filmkit 在本地调用工具并合成。两
 
 ## 本地操作
 
-安装 filmkit 仓库中的 `tools/vflow/` 辅助 CLI（需要支持 `--mode` 的版本），完成 Cloudflare Access 登录或配置已获项目权限的服务身份。凭据不写进命令或项目。复制页面命令到本地运行，再进入输出目录：
+安装 filmkit 0.8.0 或更新版本（Homebrew 或 `bun link` 同时提供 `filmkit` 和 `vflow-pull`），完成 Cloudflare Access 登录或配置已获项目权限的服务身份。凭据不写进命令或项目。复制页面命令到本地运行，再进入输出目录：
 
 ```sh
 filmkit doctor
