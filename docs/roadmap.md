@@ -12,7 +12,7 @@ vflow 是面向人和多个 Agent 的开源视频作品编排协议与轻量协�
 
 ## 当前能力清单
 - **开源仓库与文档**：GitHub Public 仓库已创建；README、AGENTS 和架构文档与代码实现保持同步。
-- **本地核心实现与验收**：`packages/protocol`、`packages/domain`、`packages/client`、`apps/api`、`apps/web` 及 24 套 E2E/集成测试（`tests/e2e/01` 至 `24`）已实现；真实 Chromium 检查覆盖项目/多编排导航、新建与失败恢复、合成图片/视频/音频、100 镜头、只读/可写角色和 360–1920 像素布局。
+- **本地核心实现与验收**：`packages/protocol`、`packages/domain`、`packages/client`、`apps/api`、`apps/web` 及 25 套 E2E/集成测试（`tests/e2e/01` 至 `25`）已实现；真实 Chromium 检查覆盖项目/多编排导航、新建与失败恢复、合成图片/视频/音频、100 镜头、只读/可写角色和 360–1920 像素布局。
 - **Cloudflare 生产环境（M4 已部署核验）**：子域名 `https://video-compose.talkincode.net`（现 canonical 为 `https://vflow.talkincode.net`，旧域保留兼容）、Cloudflare Access 可复用策略（SSO + Service Token）、D1（`video-compose-db`）与 R2（`video-compose-media`）真实绑定及线上端到端读写均已部署并实测通过。
 
 ## 非目标（铁律）
@@ -67,6 +67,7 @@ vflow 是面向人和多个 Agent 的开源视频作品编排协议与轻量协�
 | 分镜素材图管理与上限限制 | 本地已实现 | 中 | 是 | 是 | ✅ (单镜头最多5张素材图、候选属性编辑、素材解除关联、未引用素材删除、工作台UI与MCP工具) | ✅ (单镜头超过5张素材图拒绝、协议校验拒绝、删除已引用资产拒绝) | ✅ (`writer` 可增改删，`reader` 拒绝写入和删除) | ✅ (超额添加保持原修订与候选不变，回滚保护) | `tests/e2e/13-shot-material-candidates.test.tsx` |
 | 类型化参考制作与无字序列 | 本地已实现，待发布 | 高 | 是 | 是 | ✅ (指导→分包→场景→序列→精确输入→实际记录) | ✅ (混合板、错归属/用途、未知审阅、非法宫格、超预算、循环、有损导出) | ✅ (`reader/writer/agent/非成员`；REST/MCP/资源/UI) | ✅ (put/review/approve/evidence 故障重试、并发/版本冲突、导入原子回滚、31+32 镜头保留) | `tests/e2e/14-reference-authoring.test.ts`, `tests/e2e/15-reference-integrity.test.ts`, `tests/e2e/09-d1-r2-persistence-and-bootstrap.test.tsx`, `tests/browser/reference-authoring.spec.ts`；[A01–A18 映射](reference-authoring.md#验收映射本地) |
 | 动态白模参考（`motion_reference`，L0 外部生成） | 本地已实现，待发布 | 高 | 是 | 是 | ✅ (提交→整体审阅→批准→固定到编排→准备输入包（整段视频）→回报实际使用→导出→导入→再次准备出同一输入；工作台播放白模视频与关键帧；纯 MCP 全生命周期) | ✅ (未审阅/缺检查/驳回、错媒体角色/未验证图/时长与关键帧越界、主体/场景/变体不符、身份图互斥复用、视频能力未明示不自动降级、关键帧降级须显式且计入预算、编排/主体/环境漂移、伪造 packet、缺依赖导入、v1 有损导出) | ✅ (`owner`/`writer` Agent、`reader`、非成员、匿名；工作台只读禁写；MCP 同权) | ✅ (put/review/approve/evidence/import 故障无半成品、幂等重试、CAS 冲突、D1 跨 isolate、UI 失败保留草稿) | `tests/e2e/18` 至 `24`、`tests/e2e/09`、`tests/browser/motion-reference.spec.ts`；[验收映射](reference-authoring.md#验收映射本地) |
+| filmkit 固定版本交接 | 本地实现，待发布 | 中 | 是 | 只读交接 | ✅（双模式提示、固定修订命令、缺项定位；真实跨仓库合成） | ✅（未选视频、无时长、音轨越界、草稿/素材失败阻止交接） | ✅（writer/reader；非成员导出拒绝、撤权后拒绝拉取） | ✅（失败保存保留草稿、剪贴板失败可手动复制；下游下载/音频裁切失败不破坏原文件） | `tests/e2e/25-filmkit-handoff.test.tsx`、`tests/browser/filmkit-handoff.spec.ts`；filmkit `scripts/e2e-vflow-handoff.ts`；[使用与边界](filmkit.md) |
 | JSON/YAML 交换 | 本地已实现 | 高 | 是 | 是 | ✅ | ✅ (损坏语法/缺失资产依赖原子拒绝) | ✅ (`reader` 可导出不可导入 / `writer` 可导入) | ✅ (导入失败保持目标项目原编排不变) | `tests/e2e/08-interchange-json-yaml.test.ts` |
 
 ### 已识别缺口和最低期望

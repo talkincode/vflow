@@ -13,6 +13,7 @@ import {
 } from "@vflow/protocol";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AccountMenu } from "./AccountMenu.tsx";
+import { FilmkitHandoff } from "./FilmkitHandoff.tsx";
 import { WorkspaceIcon } from "./WorkspaceIcon.tsx";
 import { MediaPreview } from "./MediaPreview.tsx";
 import {
@@ -1420,6 +1421,14 @@ export function Workbench({
                   </button>
                 </div>
               </div>
+              <FilmkitHandoff
+                document={doc}
+                revision={head}
+                assets={assets}
+                assetsFailed={assetsError}
+                dirty={dirtyCount > 0 || referenceDirty}
+                onChooseShot={chooseShot}
+              />
               <pre className="source-code">
                 {sourceFormat === "yaml"
                   ? serializeCompositionYaml(doc)

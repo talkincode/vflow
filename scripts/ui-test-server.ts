@@ -155,6 +155,8 @@ const server = createServer(async (request, response) => {
     );
   }
 });
-server.listen(4179, "127.0.0.1", () =>
-  console.log("Local acceptance fixture: http://127.0.0.1:4179"),
+const port = Number(process.env.VFLOW_TEST_PORT ?? 4179);
+if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid VFLOW_TEST_PORT");
+server.listen(port, "127.0.0.1", () =>
+  console.log(`Local acceptance fixture: http://127.0.0.1:${port}`),
 );
